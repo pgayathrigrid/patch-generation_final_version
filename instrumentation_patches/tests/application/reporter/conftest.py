@@ -71,7 +71,7 @@ def _gap(category: HookCategory) -> GovernanceGap:
         recommendation=GovernanceRecommendation(
             action=f"Add {category.value} hook",
             rationale="Required by AWCP governance policy",
-            instrumentation_hint=f"Use awcp_hooks.{category.value}() at entry point",
+            instrumentation_hint=f"Call get_manager().dispatch(HookType.{category.value.upper()}, agent_id=agent_id, task_id=task_id)",
             priority=1,
         ),
     )
@@ -89,7 +89,7 @@ def _proposal(category: HookCategory, fragment: str = "hook()") -> PatchProposal
                 explanation="test",
             )
         ],
-        import_additions=["import awcp_hooks"],
+        import_additions=["from awcp.agent_hooks import get_manager", "from awcp.agent_hooks.types import HookType"],
         explanation="test",
         confidence=0.9,
         metadata=PatchMetadata(
@@ -102,7 +102,7 @@ def _proposal(category: HookCategory, fragment: str = "hook()") -> PatchProposal
 
 
 def _patched_source(
-    source: str = "import os\ndef run():\n    awcp_hooks.task_started(t, a)\n    pass\n",
+    source: str = "from awcp.agent_hooks import get_manager\nfrom awcp.agent_hooks.types import HookType\nimport os\ndef run():\n    get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)\n    pass\n",
     proposals: list[PatchProposal] | None = None,
 ) -> PatchedSource:
     agent = AgentSource.from_string(source, "test_agent")
@@ -159,12 +159,12 @@ def _observation(
 
 @pytest.fixture
 def task_started_proposal() -> PatchProposal:
-    return _proposal(HookCategory.TASK_STARTED, "awcp_hooks.task_started(task_id, agent_name)")
+    return _proposal(HookCategory.TASK_STARTED, "get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)")
 
 
 @pytest.fixture
 def task_failed_proposal() -> PatchProposal:
-    return _proposal(HookCategory.TASK_FAILED, "awcp_hooks.task_failed(task_id, error)")
+    return _proposal(HookCategory.TASK_FAILED, "get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id, error=str(error))")
 
 
 @pytest.fixture

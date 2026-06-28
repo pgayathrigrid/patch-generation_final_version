@@ -46,7 +46,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "timelines cannot be reconstructed."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.task_started(task_id, agent_name, **context) at the "
+                "Call get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id) at the "
                 "very beginning of each task handler, before any business logic runs. "
                 "Include task_id and agent_name in every call."
             ),
@@ -71,7 +71,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "tracking, SLA monitoring, and audit completeness."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.task_completed(task_id, result_summary, **context) at "
+                "Call get_manager().dispatch(HookType.TASK_COMPLETED, agent_id=agent_id, task_id=task_id) at "
                 "each successful return point in the task handler. Pass the same task_id "
                 "used in the corresponding task_started call."
             ),
@@ -97,7 +97,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "to the platform."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.task_failed(task_id, error_type, error_message, **context) "
+                "Call get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id, error=str(error)) "
                 "inside every except block and at each non-success return path. Include the "
                 "exception type name and a short description."
             ),
@@ -122,7 +122,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "and PII detection. They are mandatory in regulated environments."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.llm_call(model, prompt_preview, **context) immediately "
+                "Call get_manager().dispatch(HookType.LLM_CALL, agent_id=agent_id, task_id=task_id, model=model) immediately "
                 "before every call to an LLM client. Do not include the full prompt in the "
                 "hook payload if it may contain PII; use a redacted summary instead."
             ),
@@ -148,7 +148,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "and quality gate enforcement."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.synthesize(input_count, output_length, **context) at the "
+                "Call get_manager().dispatch(HookType.SYNTHESIZE, agent_id=agent_id, task_id=task_id) at the "
                 "beginning of the synthesis function, after retrieving supporting evidence "
                 "but before generating the final response."
             ),
@@ -174,7 +174,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "audit completeness. This is a hard AWCP governance requirement."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.tool_call(tool_name, tool_input_summary, **context) "
+                "Call get_manager().dispatch(HookType.TOOL_CALL, agent_id=agent_id, task_id=task_id, tool_name=tool_name, action=action) "
                 "immediately before invoking any external tool. The hook must fire before "
                 "the tool executes so that a policy check can block the call if needed."
             ),
@@ -200,7 +200,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "over external or user-controlled content."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.web_search(query, results_count, **context) immediately "
+                "Call get_manager().dispatch(HookType.WEB_SEARCH, agent_id=agent_id, task_id=task_id, query=query) immediately "
                 "before the search client is invoked. Pass the raw query so that policy "
                 "hooks can inspect or redact it."
             ),
@@ -226,9 +226,9 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "reports cannot be generated."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.token_usage(prompt_tokens, completion_tokens, total_tokens, "
-                "**context) immediately after receiving each LLM response. Read the token "
-                "counts from the response object's usage field."
+                "Call get_manager().dispatch(HookType.TOKEN_USAGE, agent_id=agent_id, task_id=task_id) "
+                "immediately after receiving each LLM response. Add prompt_tokens and completion_tokens "
+                "as extra kwargs so the hook manager can forward them to OTel metrics."
             ),
             priority=3,
         ),
@@ -252,7 +252,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "between normal operation and budget exhaustion."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.budget_warn(used_ratio, limit, agent_name, **context) "
+                "Call get_manager().dispatch(HookType.BUDGET_WARN, agent_id=agent_id, task_id=task_id) "
                 "when cumulative token or cost usage crosses the warning threshold "
                 "(typically 80 % of the configured budget). Include used_ratio as a "
                 "float between 0 and 1."
@@ -280,7 +280,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "attribute costs to the correct team or task."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.budget_exhausted(used_ratio, agent_name, **context) as "
+                "Call get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id) as "
                 "the first action inside the budget-exhaustion handler. Set used_ratio to "
                 "1.0 (or the actual overage ratio) and include the agent name and task id."
             ),
@@ -306,7 +306,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "producing meaningful traces in the governance dashboard."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.observability(checkpoint_name, data, **context) at each "
+                "Call get_manager().dispatch(HookType.STEP, agent_id=agent_id, task_id=task_id, checkpoint=checkpoint_name) at each "
                 "significant intermediate step — after retrieval, after each reasoning "
                 "pass, and before final synthesis. Use a descriptive checkpoint_name so "
                 "traces are self-documenting."
@@ -334,7 +334,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "auditors can reconstruct the full policy decision history for any task."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.policy_check(policy_name, decision, **context) "
+                "Call get_manager().dispatch(HookType.GATE_EVALUATED, agent_id=agent_id, task_id=task_id, action=action, decision=decision, write=True, mode='policy') "
                 "immediately after each policy gate returns a decision. Pass the exact "
                 "policy identifier and the allow/deny outcome so the audit trail is "
                 "unambiguous."
@@ -361,7 +361,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "oversight happened, which is a hard requirement in regulated environments."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.approval_request(action, risk_level, **context) before "
+                "Call get_manager().dispatch(HookType.APPROVAL_REQUIRED, agent_id=agent_id, task_id=task_id, action=action, risk=risk_level) before "
                 "the agent suspends execution to wait for a human decision. Include the "
                 "action description and its assessed risk level so the approver has full "
                 "context in the governance dashboard."
@@ -388,7 +388,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "auditing which code paths were active during any given task."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.feature_flag(flag_name, enabled, **context) immediately "
+                "Call get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, flag_name=flag_name, enabled=enabled) immediately "
                 "after evaluating a feature flag. Pass the flag's canonical name and its "
                 "resolved boolean value so the audit trail captures the exact flag state "
                 "at execution time."
@@ -416,7 +416,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "their token or time budgets."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.recovery(attempt_number, reason, **context) at the top "
+                "Call get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, attempt=attempt_number, reason=reason) at the top "
                 "of every retry loop iteration or exception-recovery block. Pass the "
                 "1-based attempt count and a short description of why recovery was "
                 "triggered."
@@ -445,7 +445,7 @@ DEFAULT_RISK_CATALOG: RiskCatalog = {
                 "against actual agent behaviour."
             ),
             instrumentation_hint=(
-                "Call awcp_hooks.degradation(from_mode, to_mode, reason, **context) "
+                "Call get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id=agent_id, task_id=task_id, from_mode=from_mode, to_mode=to_mode) "
                 "immediately when the agent receives a degradation signal from the "
                 "control plane. Pass the previous and new autonomy modes and a short "
                 "reason so the audit trail captures the full transition."
