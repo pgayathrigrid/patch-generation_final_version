@@ -83,6 +83,9 @@ class MarkdownFormatter(ReportFormatter):
 
         sections.append(self._section_evidence(report))
 
+        if report.patch_diff:
+            sections.append(self._section_patch_diff(report))
+
         return "\n\n".join(s for s in sections if s) + "\n"
 
     # ------------------------------------------------------------------
@@ -255,6 +258,19 @@ class MarkdownFormatter(ReportFormatter):
             lines.append("**stderr:** _empty_  ")
             lines.append("")
 
+        return "\n".join(lines)
+
+    @staticmethod
+    def _section_patch_diff(report: BuiltReport) -> str:
+        lines = [
+            "## Patch Diff",
+            "",
+            "Changes applied to the agent source by the instrumentation engine:",
+            "",
+            "```diff",
+            report.patch_diff.rstrip(),
+            "```",
+        ]
         return "\n".join(lines)
 
 

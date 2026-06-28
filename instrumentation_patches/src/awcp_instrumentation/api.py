@@ -40,7 +40,11 @@ from awcp_instrumentation.application.gap_reporter.gap_reporter import Governanc
 from awcp_instrumentation.application.generator.patch_generator import LlmPatchGenerator
 from awcp_instrumentation.application.generator.providers.mock_provider import MockLlmProvider
 from awcp_instrumentation.application.reporter.builder import ValidationReportBuilder
-from awcp_instrumentation.application.reporter.models import BuiltReport
+from awcp_instrumentation.application.reporter.models import (
+    AgentInfo,
+    BuiltReport,
+    ExecutionSummary,
+)
 from awcp_instrumentation.application.sandbox.output_pattern_collector import (
     OutputPatternCollector,
 )
@@ -48,6 +52,40 @@ from awcp_instrumentation.application.sandbox.python_sandbox_validator import (
     PythonSandboxValidator,
 )
 from awcp_instrumentation.application.scanner.filesystem_scanner import FilesystemScanner
+
+try:
+    # When running as part of AWCP, use its fully-configured OTel tracer so that
+    # the instrumentation pipeline stages appear in the shared Tempo trace.
+    from awcp.observability.setup import get_tracer as _awcp_get_tracer
+
+    def get_tracer():  # type: ignore[misc]
+        return _awcp_get_tracer("awcp.instrumentation")
+
+except Exception:  # pragma: no cover
+    from contextlib import contextmanager
+    from typing import Generator, Any as _Any
+
+    class _NoOpSpan:
+        def set_attribute(self, k: str, v: _Any) -> None: pass
+        def record_exception(self, e: Exception) -> None: pass
+        def __enter__(self) -> "_NoOpSpan": return self
+        def __exit__(self, *_: _Any) -> None: pass
+
+    class _NoOpTracer:
+        @contextmanager
+        def start_as_current_span(self, name: str, **_kw: _Any) -> Generator[_NoOpSpan, None, None]:
+            yield _NoOpSpan()
+
+    def get_tracer() -> _NoOpTracer:  # type: ignore[misc]
+        return _NoOpTracer()
+
+
+# Hook categories whose absence blocks AWCP quarantine exit.
+# Derived from onboarding.decide_status(): only OBSERVABILITY, FEATURE_FLAG,
+# and POLICY gates are evaluated before an agent is allowed to leave quarantine.
+_QUARANTINE_BLOCKING_CATEGORIES: frozenset = frozenset(
+    {"observability", "feature_flag", "policy"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -72,14 +110,18 @@ class AgentInstrumentationSummary:
                             agent given its detected capabilities.
         present_hooks:      Lifecycle categories already found in the source
                             before any patching.
-        missing_hooks:      Categories absent from the source and required by
-                            the agent's detected capabilities.
-        patches_applied:    Number of patch proposals successfully applied.
-        patches_failed:     Number of proposals that could not be applied.
-        validation_status:  ``"passed"`` / ``"failed"`` / ``"skipped"``.
-        warnings:           Non-fatal issues from the sandbox validation stage.
-        errors:             Fatal issues encountered during validation.
-        report:             Full ``BuiltReport`` for downstream rendering.
+        missing_hooks:         Categories absent from the source and required by
+                               the agent's detected capabilities.
+        quarantine_blockers:   Subset of ``missing_hooks`` that directly gates
+                               AWCP quarantine exit (observability, feature_flag,
+                               policy).  Empty means the agent can exit quarantine
+                               even with other hooks still missing.
+        patches_applied:       Number of patch proposals successfully applied.
+        patches_failed:        Number of proposals that could not be applied.
+        validation_status:     ``"passed"`` / ``"failed"`` / ``"skipped"``.
+        warnings:              Non-fatal issues from the sandbox validation stage.
+        errors:                Fatal issues encountered during validation.
+        report:                Full ``BuiltReport`` for downstream rendering.
     """
 
     agent_name: str
@@ -88,6 +130,7 @@ class AgentInstrumentationSummary:
     required_hooks: List[str]
     present_hooks: List[str]
     missing_hooks: List[str]
+    quarantine_blockers: List[str]
     patches_applied: int
     patches_failed: int
     validation_status: str
@@ -180,6 +223,43 @@ class InstrumentationResult:
         return sum(len(a.errors) for a in self.agents)
 
     # ------------------------------------------------------------------
+    # AWCP quarantine blockers
+    # ------------------------------------------------------------------
+
+    @property
+    def quarantine_blockers(self) -> List[str]:
+        """Union of per-agent quarantine blockers (unique, stable order).
+
+        Categories in this list must be present before any agent can exit
+        AWCP quarantine.  An empty list means no agent is blocked on
+        observability, feature_flag, or policy grounds.
+        """
+        seen: set = set()
+        result: List[str] = []
+        for a in self.agents:
+            for h in a.quarantine_blockers:
+                if h not in seen:
+                    seen.add(h)
+                    result.append(h)
+        return result
+
+    # ------------------------------------------------------------------
+    # Patch bundle
+    # ------------------------------------------------------------------
+
+    @property
+    def patch_bundle(self) -> str:
+        """Combined unified diff across all agents.
+
+        Concatenates the per-agent ``patch_diff`` strings from the
+        instrumentation reports.  Suitable for attaching to a PR or CI
+        review step (AWCP Operating Model Step 06).  Empty when no
+        patches were generated.
+        """
+        parts = [a.report.patch_diff for a in self.agents if a.report.patch_diff]
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
     # Repository summary
     # ------------------------------------------------------------------
 
@@ -211,15 +291,21 @@ def run_instrumentation(
     repository_path: str,
     *,
     llm_provider: Optional[object] = None,
+    dry_run: bool = False,
 ) -> InstrumentationResult:
     """
-    Run the full AWCP instrumentation pipeline against *repository_path*.
+    Run the AWCP instrumentation pipeline against *repository_path*.
 
     Args:
         repository_path: Path to a Python file or directory to analyse.
         llm_provider:    Optional ``LlmProvider`` implementation.  Defaults to
                          ``MockLlmProvider`` (no network calls).  Inject a real
                          provider (e.g. ``AnthropicProvider``) for live patching.
+        dry_run:         When ``True``, Stages 7-8 (sandbox validation and full
+                         report building) are skipped.  Each agent summary gets
+                         ``validation_status="skipped"`` and the report contains
+                         only the patch diff.  Use this to preview generated
+                         patches without executing untrusted code.
 
     Returns:
         ``InstrumentationResult`` with per-agent summaries and aggregate stats.
@@ -243,46 +329,101 @@ def run_instrumentation(
     validator = PythonSandboxValidator(collectors=[OutputPatternCollector()])
     builder = ValidationReportBuilder()
 
+    tracer = get_tracer()
+
     # Stage 1 — Scan
-    scan_result = scanner.scan(target)
+    with tracer.start_as_current_span("awcp.instrumentation.scan") as span:
+        scan_result = scanner.scan(target)
+        span.set_attribute("scanned_files", scan_result.scanned_files)
     scan_errors = [f"{e.path}: {e.reason}" for e in scan_result.errors]
 
     summaries: List[AgentInstrumentationSummary] = []
     pipeline_errors: List[str] = []
 
     for agent in scan_result.agents:
+        agent_name = agent.agent_name or str(agent.path)
         try:
-            # Stage 2 — Capability analysis (determines which hooks are required)
-            cap_result: CapabilityAnalysisResult = capability_analyzer.analyze(agent)
+            with tracer.start_as_current_span("awcp.instrumentation.agent") as agent_span:
+                agent_span.set_attribute("agent.name", agent_name)
 
-            # Stage 3 — Detect existing hooks
-            detection = detector.detect(agent)
+                # Stage 2 — Capability analysis (determines which hooks are required)
+                with tracer.start_as_current_span("awcp.instrumentation.capability_analysis"):
+                    cap_result: CapabilityAnalysisResult = capability_analyzer.analyze(agent)
 
-            # Stage 4 — Gap report (gaps scoped to capability-required hooks only)
-            gap_report = reporter.generate(
-                detection,
-                required_categories=cap_result.required_hook_categories,
-            )
+                # Stage 3 — Detect existing hooks
+                with tracer.start_as_current_span("awcp.instrumentation.detect"):
+                    detection = detector.detect(agent)
 
-            # Stage 5 — Generate targeted instrumentation patches
-            generation = generator.generate(gap_report)
+                # Stage 4 — Gap report (gaps scoped to capability-required hooks only)
+                with tracer.start_as_current_span("awcp.instrumentation.gap_report") as gs:
+                    gap_report = reporter.generate(
+                        detection,
+                        required_categories=cap_result.required_hook_categories,
+                    )
+                    gs.set_attribute("gap_count", len(gap_report.gaps))
 
-            # Stage 6 — Apply patches to source text
-            apply_result = applier.apply(agent, generation)
-            patched = apply_result.patched_source
+                # Stage 5 — Generate targeted instrumentation patches
+                with tracer.start_as_current_span("awcp.instrumentation.generate"):
+                    generation = generator.generate(gap_report)
 
-            # Stage 7 — Validate patched code in sandbox
-            validation = validator.validate(patched=patched)
+                # Stage 6 — Apply patches to source text
+                with tracer.start_as_current_span("awcp.instrumentation.apply"):
+                    apply_result = applier.apply(agent, generation)
+                patched = apply_result.patched_source
+                redetect_warnings: List[str] = []
 
-            # Stage 8 — Build structured report
-            report: BuiltReport = builder.build(validation)
+                # Stage 6.5 — Re-detect on patched source to confirm hooks landed
+                if patched.has_changes and patched.applied_proposals:
+                    with tracer.start_as_current_span("awcp.instrumentation.redetect"):
+                        patched_detection = detector.detect(patched.as_agent_source)
+                    detected_cats = {h.category for h in patched_detection.present_hooks}
+                    for proposal in patched.applied_proposals:
+                        if proposal.category not in detected_cats:
+                            redetect_warnings.append(
+                                f"Hook '{proposal.category.value}' was applied but "
+                                "is not detectable in the patched source — "
+                                "the patch may have been inserted in an unreachable location."
+                            )
+
+                if dry_run:
+                    # Stages 7-8 skipped — produce a minimal report from the
+                    # in-memory patch only; no subprocess is spawned.
+                    report: BuiltReport = BuiltReport(
+                        agent=AgentInfo(name=agent_name, path=str(agent.path)),
+                        generated_at=datetime.now(tz=timezone.utc),
+                        overall_status="skipped",
+                        execution_summary=ExecutionSummary(
+                            mode="dry_run",
+                            environment="none",
+                            executed=False,
+                            duration_ms=None,
+                            exit_code=None,
+                            timed_out=False,
+                            syntax_valid=True,
+                            stdout_excerpt="",
+                            stderr_excerpt="",
+                        ),
+                        patch_diff=patched.diff,
+                        summary="Dry-run: sandbox validation skipped.",
+                    )
+                else:
+                    # Stage 7 — Validate patched code in sandbox
+                    with tracer.start_as_current_span("awcp.instrumentation.validate"):
+                        validation = validator.validate(patched=patched)
+
+                    # Stage 8 — Build structured report
+                    with tracer.start_as_current_span("awcp.instrumentation.report"):
+                        report = builder.build(validation)
 
             present = [h.category.value for h in detection.present_hooks]
             missing = [
                 h.category.value for h in detection.missing_hooks
                 if h.category in cap_result.required_hook_categories
             ]
-            warnings = [w.message for w in report.warnings]
+            quarantine_blockers = [
+                h for h in missing if h in _QUARANTINE_BLOCKING_CATEGORIES
+            ]
+            warnings = [w.message for w in report.warnings] + redetect_warnings
             errors = [
                 f"{e.error_type}: {e.message}" for e in report.errors
             ]
@@ -295,6 +436,7 @@ def run_instrumentation(
                     required_hooks=cap_result.required_hook_names,
                     present_hooks=present,
                     missing_hooks=missing,
+                    quarantine_blockers=quarantine_blockers,
                     patches_applied=len(patched.applied_proposals),
                     patches_failed=len(patched.errors),
                     validation_status=report.overall_status,

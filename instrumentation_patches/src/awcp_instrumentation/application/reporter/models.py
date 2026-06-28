@@ -220,6 +220,7 @@ class BuiltReport:
     recommendations: List[HookRecommendation] = field(default_factory=list)
 
     summary: str = ""
+    patch_diff: str = ""
 
     total_hooks: int = 0
     passed_hooks: int = 0

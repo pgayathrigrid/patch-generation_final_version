@@ -177,6 +177,17 @@ class TestBeforeFunctionBody:
         )
         assert r.warning is None
 
+    def test_async_function_resolved(self) -> None:
+        source = "async def fetch(url):\n    return url\n"
+        r = RESOLVER.resolve(
+            InsertionLocation.BEFORE_FUNCTION_BODY,
+            source,
+            target_function="fetch",
+        )
+        assert r.line_number == 2
+        assert r.indent == "    "
+        assert r.warning is None
+
 
 # ---------------------------------------------------------------------------
 # AROUND_FUNCTION

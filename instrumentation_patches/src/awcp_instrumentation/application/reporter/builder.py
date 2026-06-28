@@ -95,6 +95,7 @@ class ValidationReportBuilder(ReportBuilder):
             warnings=warnings,
             recommendations=recommendations,
             summary=summary,
+            patch_diff=result.patched_source_ref.diff,
             total_hooks=total,
             passed_hooks=passed,
             failed_hooks=failed,

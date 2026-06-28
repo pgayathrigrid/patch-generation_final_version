@@ -297,15 +297,18 @@ class TestErrorHandling:
         assert proposal.status == ProposalStatus.FAILED
 
     def test_one_failed_gap_does_not_abort_others(self) -> None:
-        call_log = []
-        # First call raises, second call succeeds
-        responses = [LlmProviderError("fail"), None]
+        # With 2+ gaps the generator makes one batch call first, then falls back
+        # to per-gap calls if the batch fails.  We fail the batch call and the
+        # first per-gap fallback call (calls 1 and 2) so that only the second
+        # per-gap fallback call (call 3) succeeds, giving one FAILED and one
+        # SUCCESS proposal — the same contract as before batch mode was added.
+        call_log: list = []
 
         class SelectiveMock(MockLlmProvider):
             def complete(self, request):
                 call_log.append(request)
-                if len(call_log) == 1:
-                    raise LlmProviderError("fail on first call")
+                if len(call_log) <= 2:
+                    raise LlmProviderError("fail on batch + first fallback")
                 return super().complete(request)
 
         mock = SelectiveMock(response_content=valid_response_json())

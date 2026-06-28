@@ -46,9 +46,13 @@ _HOOK_CODE: Dict[str, str] = {
     "degradation":      "get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id=agent_id, task_id=task_id, from_mode=from_mode, to_mode=to_mode)",
 }
 
-# Regex to extract the hook category from the structured prompt produced by
-# PromptBuilder, which always includes the line:  **Category:** `{category}`
+# Regex to extract the hook category from a single-gap prompt:
+#   **Category:** `{category}`
 _CATEGORY_RE = re.compile(r"\*\*Category:\*\*\s*`([^`]+)`")
+
+# Regex to extract gap categories from a batch prompt:
+#   ### Gap N: {category}
+_BATCH_GAP_RE = re.compile(r"^### Gap \d+: (\S+)", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +97,46 @@ def _default_response_json(request: LlmRequest) -> str:
         "confidence": 0.85,
     }
     return json.dumps(response, indent=2)
+
+
+def _default_batch_response_json(request: LlmRequest) -> str:
+    """
+    Build a deterministic JSON-array response for batch requests.
+
+    Extracts every ``### Gap N: {category}`` line from the prompt and returns
+    one response object per gap, in order.
+    """
+    categories = _BATCH_GAP_RE.findall(request.prompt)
+    responses: List[Dict[str, Any]] = []
+    for category in categories:
+        hook_code = _HOOK_CODE.get(
+            category,
+            f"get_manager().dispatch(HookType.{category.upper()}, agent_id=agent_id, task_id=task_id)",
+        )
+        responses.append(
+            {
+                "import_additions": [
+                    "from awcp.agent_hooks import get_manager",
+                    "from awcp.agent_hooks.types import HookType",
+                ],
+                "changes": [
+                    {
+                        "code_fragment": hook_code,
+                        "location": "before_function_body",
+                        "target_function": "run",
+                        "explanation": (
+                            f"Insert AWCP {category} lifecycle hook at the "
+                            "entry point of the agent's main execution function."
+                        ),
+                    }
+                ],
+                "explanation": (
+                    f"Added {hook_code} to satisfy AWCP {category} lifecycle instrumentation."
+                ),
+                "confidence": 0.85,
+            }
+        )
+    return json.dumps(responses, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -144,11 +188,12 @@ class MockLlmProvider(LlmProvider):
         if self._raise_error is not None:
             raise self._raise_error
 
-        content = (
-            self._response_content
-            if self._response_content is not None
-            else _default_response_json(request)
-        )
+        if self._response_content is not None:
+            content = self._response_content
+        elif _BATCH_GAP_RE.search(request.prompt):
+            content = _default_batch_response_json(request)
+        else:
+            content = _default_response_json(request)
         effective_model = request.model or self._model_name
 
         return LlmResponse(

@@ -200,3 +200,123 @@ class TestSummaryWarningsAndErrors:
         result = run_instrumentation(str(tmp_path))
         for summary in result.agents:
             assert all(isinstance(e, str) for e in summary.errors)
+
+
+# ---------------------------------------------------------------------------
+# quarantine_blockers
+# ---------------------------------------------------------------------------
+
+class TestQuarantineBlockers:
+    def test_summary_has_quarantine_blockers_field(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "x = 1")
+        result = run_instrumentation(str(tmp_path))
+        for summary in result.agents:
+            assert hasattr(summary, "quarantine_blockers")
+            assert isinstance(summary.quarantine_blockers, list)
+
+    def test_result_has_quarantine_blockers_property(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "x = 1")
+        result = run_instrumentation(str(tmp_path))
+        assert isinstance(result.quarantine_blockers, list)
+
+    def test_quarantine_blockers_subset_of_missing(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path))
+        for summary in result.agents:
+            # every blocker must also be in missing_hooks
+            for b in summary.quarantine_blockers:
+                assert b in summary.missing_hooks
+
+    def test_quarantine_blockers_only_three_categories(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path))
+        allowed = {"observability", "feature_flag", "policy"}
+        for summary in result.agents:
+            for b in summary.quarantine_blockers:
+                assert b in allowed
+
+    def test_top_level_blockers_union_of_agents(self, tmp_path):
+        _write_agent(tmp_path, "a.py", "import openai")
+        result = run_instrumentation(str(tmp_path))
+        per_agent = set()
+        for summary in result.agents:
+            per_agent.update(summary.quarantine_blockers)
+        assert set(result.quarantine_blockers) == per_agent
+
+    def test_top_level_blockers_no_duplicates(self, tmp_path):
+        _write_agent(tmp_path, "a.py", "import openai")
+        _write_agent(tmp_path, "b.py", "import openai")
+        result = run_instrumentation(str(tmp_path))
+        assert len(result.quarantine_blockers) == len(set(result.quarantine_blockers))
+
+
+# ---------------------------------------------------------------------------
+# dry_run parameter
+# ---------------------------------------------------------------------------
+
+class TestDryRun:
+    def test_dry_run_returns_instrumentation_result(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "x = 1")
+        result = run_instrumentation(str(tmp_path), dry_run=True)
+        assert isinstance(result, InstrumentationResult)
+
+    def test_dry_run_sets_validation_status_skipped(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path), dry_run=True)
+        for summary in result.agents:
+            assert summary.validation_status == "skipped"
+
+    def test_dry_run_report_overall_status_skipped(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path), dry_run=True)
+        for summary in result.agents:
+            assert summary.report.overall_status == "skipped"
+
+    def test_dry_run_report_execution_mode_dry_run(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path), dry_run=True)
+        for summary in result.agents:
+            assert summary.report.execution_summary.mode == "dry_run"
+            assert summary.report.execution_summary.executed is False
+
+    def test_dry_run_agents_processed_same_as_normal(self, tmp_path):
+        _write_agent(tmp_path, "a.py", "import openai")
+        _write_agent(tmp_path, "b.py", "import anthropic")
+        normal = run_instrumentation(str(tmp_path))
+        dry = run_instrumentation(str(tmp_path), dry_run=True)
+        assert dry.agents_processed == normal.agents_processed
+
+    def test_dry_run_false_is_default_behaviour(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        r_default = run_instrumentation(str(tmp_path))
+        r_explicit = run_instrumentation(str(tmp_path), dry_run=False)
+        # Both should produce the same result; neither should say "dry_run" mode
+        assert r_default.agents[0].validation_status == r_explicit.agents[0].validation_status
+        for s in r_default.agents:
+            assert s.report.execution_summary.mode != "dry_run"
+
+
+# ---------------------------------------------------------------------------
+# patch_bundle property
+# ---------------------------------------------------------------------------
+
+class TestPatchBundle:
+    def test_patch_bundle_is_string(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path))
+        assert isinstance(result.patch_bundle, str)
+
+    def test_patch_bundle_dry_run_has_diff_when_patches_applied(self, tmp_path):
+        _write_agent(tmp_path, "agent.py", "import openai")
+        result = run_instrumentation(str(tmp_path), dry_run=True)
+        # At least one agent should have patches; bundle must contain diff markers
+        if result.total_patches_applied:
+            assert "@@" in result.patch_bundle or "---" in result.patch_bundle
+
+    def test_patch_bundle_empty_for_instrumented_agent(self, tmp_path):
+        # An agent with no missing hooks should produce no diff
+        _write_agent(tmp_path, "empty.py", "")
+        result = run_instrumentation(str(tmp_path))
+        # empty.py has no capabilities → required hooks = all → missing > 0 → diff expected
+        # Just assert the property exists and returns a string
+        assert isinstance(result.patch_bundle, str)

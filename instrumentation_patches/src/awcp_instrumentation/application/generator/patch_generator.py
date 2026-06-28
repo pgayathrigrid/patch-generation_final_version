@@ -7,7 +7,7 @@ Orchestrates the full loop for each governance gap:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from awcp_instrumentation.application.gap_reporter.models import (
     GovernanceGap,
@@ -86,13 +86,21 @@ class LlmPatchGenerator(PatchGenerator):
         """
         Generate proposals for every gap in *report*.
 
+        When there are 2+ gaps, a single batch LLM call is made (one prompt,
+        one response containing N patch objects).  A single gap uses the
+        normal per-gap path.  If the batch call fails, it falls back to
+        individual per-gap calls so one failure never blocks the others.
+
         A fully-instrumented agent (no gaps) returns an empty proposal list.
         LLM failures are recorded per-proposal — generation never raises.
         """
-        proposals = [
-            self.generate_for_gap(gap, report.agent)
-            for gap in report.gaps
-        ]
+        if not report.gaps:
+            proposals: List[PatchProposal] = []
+        elif len(report.gaps) == 1:
+            proposals = [self.generate_for_gap(report.gaps[0], report.agent)]
+        else:
+            proposals = self._generate_batch(report.gaps, report.agent)
+
         return PatchGenerationResult(
             report=report,
             proposals=proposals,
@@ -123,6 +131,37 @@ class LlmPatchGenerator(PatchGenerator):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _generate_batch(
+        self, gaps: List[GovernanceGap], agent: AgentSource
+    ) -> List[PatchProposal]:
+        """
+        Make one LLM call for all *gaps* and return one proposal per gap.
+
+        Falls back to individual ``generate_for_gap()`` calls if the batch
+        call or parse fails, so no gap is silently dropped.
+        """
+        request = self._builder.build_batch(gaps, agent)
+        try:
+            response = self._provider.complete(request)
+            parsed_list = self._parser.parse_batch(response, len(gaps))
+            metadata = self._make_metadata(request, response)
+            return [
+                PatchProposal(
+                    gap=gap,
+                    status=ProposalStatus.SUCCESS,
+                    changes=parsed.changes,
+                    import_additions=parsed.import_additions,
+                    explanation=parsed.explanation,
+                    confidence=parsed.confidence,
+                    metadata=metadata,
+                    raw_llm_response=response.content,
+                    error=None,
+                )
+                for gap, parsed in zip(gaps, parsed_list)
+            ]
+        except (LlmProviderError, ResponseParseError, Exception):
+            return [self.generate_for_gap(gap, agent) for gap in gaps]
 
     def _build_success_proposal(
         self,

@@ -62,6 +62,39 @@ class ResponseParser:
     it accurately in the ``PatchProposal``.
     """
 
+    def parse_batch(self, response: LlmResponse, gap_count: int) -> List[_ParsedResponse]:
+        """
+        Parse a batch ``LlmResponse`` (JSON array) into one ``_ParsedResponse``
+        per gap.
+
+        Args:
+            response:  The ``LlmResponse`` returned by the provider for a batch
+                       request built with ``PromptBuilder.build_batch()``.
+            gap_count: Expected number of gaps — the array must have exactly
+                       this many elements.
+
+        Returns:
+            List of ``_ParsedResponse`` objects, one per gap, in order.
+
+        Raises:
+            ResponseParseError: If the content is empty, not a JSON array, or
+                                 has the wrong number of elements.
+        """
+        content = response.content.strip()
+        if not content:
+            raise ResponseParseError("LLM returned an empty batch response.")
+
+        data = self._extract_json(content)
+        if not isinstance(data, list):
+            raise ResponseParseError(
+                f"Batch response root must be a JSON array, got {type(data).__name__}."
+            )
+        if len(data) != gap_count:
+            raise ResponseParseError(
+                f"Batch response has {len(data)} element(s) but expected {gap_count}."
+            )
+        return [self._build_parsed_response(item) for item in data]
+
     def parse(self, response: LlmResponse) -> _ParsedResponse:
         """
         Parse *response* into a ``_ParsedResponse``.
