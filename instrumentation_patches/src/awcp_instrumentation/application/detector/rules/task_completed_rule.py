@@ -10,17 +10,17 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.TASK_COMPLETED,
-    name="awcp_hooks.task_completed",
+    name="HookType.TASK_COMPLETED",
     description="AWCP lifecycle hook: emitted when an agent task finishes successfully",
-    signature="awcp_hooks.task_completed(task_id, result, **context)",
+    signature="get_manager().dispatch(HookType.TASK_COMPLETED, agent_id=agent_id, task_id=task_id)",
     line_number=None,
 )
 
 _KEYWORDS = [
     "task_completed", "task_complete", "on_task_complete", "on_task_completed",
-    "awcp_hooks.task_completed", "awcp.task_completed",
-    "emit_task_completed", "hook.task_complete",
-    "hooks.task_completed", "lifecycle.task_completed",
+    "hooktype.task_completed",
+    "awcp_hooks.task_completed",
+    "emit_task_completed", "hooks.task_completed",
 ]
 
 
@@ -35,6 +35,9 @@ class TaskCompletedDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

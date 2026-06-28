@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.LLM_CALL,
-    name="awcp_hooks.llm_call",
+    name="HookType.LLM_CALL",
     description="AWCP lifecycle hook: emitted before and after every LLM inference call",
-    signature="awcp_hooks.llm_call(model, prompt_tokens, **context)",
+    signature="get_manager().dispatch(HookType.LLM_CALL, agent_id=agent_id, task_id=task_id, model=model)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.llm_call", "awcp.llm_call",
     "on_llm_call", "llm_call_hook", "before_llm_call", "after_llm_call",
-    "hooks.llm_call", "lifecycle.llm_call",
-    "emit_llm_call", "track_llm_call",
     "on_llm_start", "on_llm_end",
+    "hooktype.llm_call",
+    "awcp_hooks.llm_call",
+    "hooks.llm_call", "emit_llm_call",
 ]
 
 
@@ -36,6 +36,9 @@ class LlmCallDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

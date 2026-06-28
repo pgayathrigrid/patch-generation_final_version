@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.WEB_SEARCH,
-    name="awcp_hooks.web_search",
+    name="HookType.WEB_SEARCH",
     description="AWCP lifecycle hook: emitted when the agent performs a web or retrieval search",
-    signature="awcp_hooks.web_search(query, results_count, **context)",
+    signature="get_manager().dispatch(HookType.WEB_SEARCH, agent_id=agent_id, task_id=task_id, query=query)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.web_search", "awcp.web_search",
     "on_web_search", "web_search_hook", "before_web_search", "after_web_search",
-    "hooks.web_search", "lifecycle.web_search",
-    "emit_web_search", "track_web_search",
     "on_search", "search_hook",
+    "hooktype.web_search",
+    "awcp_hooks.web_search",
+    "hooks.web_search", "emit_web_search",
 ]
 
 
@@ -36,6 +36,9 @@ class WebSearchDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

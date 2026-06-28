@@ -10,17 +10,17 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.TASK_STARTED,
-    name="awcp_hooks.task_started",
+    name="HookType.TASK_STARTED",
     description="AWCP lifecycle hook: emitted when an agent task begins execution",
-    signature="awcp_hooks.task_started(task_id, agent_name, **context)",
+    signature="get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)",
     line_number=None,
 )
 
 _KEYWORDS = [
     "task_started", "task_start", "on_task_start", "on_task_started",
-    "awcp_hooks.task_started", "awcp.task_started",
-    "emit_task_started", "hook.task_start",
-    "hooks.task_started", "lifecycle.task_started",
+    "hooktype.task_started",
+    "awcp_hooks.task_started",
+    "emit_task_started", "hooks.task_started",
 ]
 
 
@@ -35,6 +35,9 @@ class TaskStartedDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

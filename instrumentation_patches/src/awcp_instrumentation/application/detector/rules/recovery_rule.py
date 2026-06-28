@@ -10,17 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.RECOVERY,
-    name="awcp_hooks.recovery",
-    description="AWCP recovery hook: emitted when the agent attempts to recover from a failure or initiates a retry",
-    signature="awcp_hooks.recovery(attempt_number, reason, **context)",
+    name="HookType.SIGNAL_RECEIVED",
+    description="AWCP recovery hook: emitted via HookType.SIGNAL_RECEIVED when the agent retries or recovers from failure",
+    signature="get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, attempt=attempt_number, reason=reason)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.recovery", "awcp.recovery",
     "recovery_hook", "on_recovery", "retry_hook",
     "recover_hook", "on_retry", "retry_attempt",
-    "hooks.recovery", "lifecycle.recovery",
+    "hooktype.signal_received",
+    "awcp_hooks.recovery",
+    "hooks.recovery",
 ]
 
 
@@ -35,6 +36,9 @@ class RecoveryDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

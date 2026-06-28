@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.TOOL_CALL,
-    name="awcp_hooks.tool_call",
+    name="HookType.TOOL_CALL",
     description="AWCP lifecycle hook: emitted before and after every external tool invocation",
-    signature="awcp_hooks.tool_call(tool_name, tool_input, **context)",
+    signature="get_manager().dispatch(HookType.TOOL_CALL, agent_id=agent_id, task_id=task_id, tool_name=tool_name, action=action)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.tool_call", "awcp.tool_call",
     "on_tool_call", "tool_call_hook", "before_tool_call", "after_tool_call",
-    "hooks.tool_call", "lifecycle.tool_call",
-    "emit_tool_call", "track_tool_call",
     "on_tool_start", "on_tool_end", "tool_invoke",
+    "hooktype.tool_call",
+    "awcp_hooks.tool_call",
+    "hooks.tool_call", "emit_tool_call",
 ]
 
 
@@ -36,6 +36,9 @@ class ToolCallDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

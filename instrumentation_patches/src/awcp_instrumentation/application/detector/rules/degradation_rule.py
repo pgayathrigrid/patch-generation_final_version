@@ -10,17 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.DEGRADATION,
-    name="awcp_hooks.degradation",
+    name="HookType.AUTONOMY_DEGRADED",
     description="AWCP degradation hook: emitted when the agent's autonomy mode is stepped down by the control plane",
-    signature="awcp_hooks.degradation(from_mode, to_mode, reason, **context)",
+    signature="get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id=agent_id, task_id=task_id, from_mode=from_mode, to_mode=to_mode)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.degradation", "awcp.degradation",
     "autonomy_degraded", "degradation_hook", "on_degradation",
     "degrade_hook", "autonomy_step_down", "degrade_autonomy",
-    "hooks.degradation", "lifecycle.degradation",
+    "hooktype.autonomy_degraded",
+    "awcp_hooks.degradation",
+    "hooks.degradation",
 ]
 
 
@@ -35,6 +36,9 @@ class DegradationDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

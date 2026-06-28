@@ -10,17 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.APPROVAL,
-    name="awcp_hooks.approval_request",
+    name="HookType.APPROVAL_REQUIRED",
     description="AWCP approval hook: emitted when the agent requests human approval for a high-risk action",
-    signature="awcp_hooks.approval_request(action, risk_level, **context)",
+    signature="get_manager().dispatch(HookType.APPROVAL_REQUIRED, agent_id=agent_id, task_id=task_id, action=action, risk=risk_level)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.approval_request", "awcp.approval_request",
     "request_approval", "needs_approval", "approval_hook",
     "human_approval", "require_approval", "approval_required",
-    "hooks.approval", "lifecycle.approval",
+    "hooktype.approval_required",
+    "awcp_hooks.approval_request",
+    "hooks.approval",
 ]
 
 
@@ -35,6 +36,9 @@ class ApprovalDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

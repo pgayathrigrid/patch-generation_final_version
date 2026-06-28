@@ -10,17 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.POLICY,
-    name="awcp_hooks.policy_check",
-    description="AWCP policy hook: emitted when the agent evaluates a governance policy gate",
-    signature="awcp_hooks.policy_check(policy_name, decision, **context)",
+    name="HookType.GATE_EVALUATED",
+    description="AWCP policy hook: emitted when the agent passes through the OPA governance gate",
+    signature="get_manager().dispatch(HookType.GATE_EVALUATED, agent_id=agent_id, task_id=task_id, action=action, decision=decision, scope=action, write=True, mode='policy')",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.policy_check", "awcp.policy_check",
     "policy_gate", "check_policy", "gate_check",
     "policy_hook", "policy_evaluated", "policy_eval",
-    "hooks.policy_check", "lifecycle.policy",
+    "hooktype.gate_evaluated",
+    "awcp_hooks.policy_check",
+    "hooks.policy_check",
 ]
 
 
@@ -35,6 +36,9 @@ class PolicyDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

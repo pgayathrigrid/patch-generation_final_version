@@ -28,22 +28,22 @@ from awcp_instrumentation.application.generator.llm_interface import (
 # All arguments use keyword form with safe defaults so the sandbox can execute
 # the code without NameError even when the agent's local variables differ.
 _HOOK_CODE: Dict[str, str] = {
-    "task_started":     "awcp_hooks.task_started(task_id=None, agent_name=None)",
-    "task_completed":   "awcp_hooks.task_completed(task_id=None, result=None)",
-    "task_failed":      "awcp_hooks.task_failed(task_id=None, error=None, traceback=None)",
-    "llm_call":         "awcp_hooks.llm_call(model=None, prompt_tokens=0)",
-    "synthesize":       "awcp_hooks.synthesize(input_count=0, output_length=0)",
-    "tool_call":        "awcp_hooks.tool_call(tool_name=None, tool_input=None)",
-    "web_search":       "awcp_hooks.web_search(query=None, results_count=0)",
-    "token_usage":      "awcp_hooks.token_usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)",
-    "budget_warn":      "awcp_hooks.budget_warn(used_ratio=0.0, limit=0, agent_name=None)",
-    "budget_exhausted": "awcp_hooks.budget_exhausted(used_ratio=1.0, agent_name=None)",
-    "observability":    "awcp_hooks.observability(checkpoint_name=None, data=None)",
-    "policy":           "awcp_hooks.policy_check(policy_name=None, decision=None)",
-    "approval":         "awcp_hooks.approval_request(action=None, risk_level=None)",
-    "feature_flag":     "awcp_hooks.feature_flag(flag_name=None, enabled=False)",
-    "recovery":         "awcp_hooks.recovery(attempt_number=0, reason=None)",
-    "degradation":      "awcp_hooks.degradation(from_mode=None, to_mode=None, reason=None)",
+    "task_started":     "get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)",
+    "task_completed":   "get_manager().dispatch(HookType.TASK_COMPLETED, agent_id=agent_id, task_id=task_id)",
+    "task_failed":      "get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id, error=str(error))",
+    "llm_call":         "get_manager().dispatch(HookType.LLM_CALL, agent_id=agent_id, task_id=task_id, model=model)",
+    "synthesize":       "get_manager().dispatch(HookType.SYNTHESIZE, agent_id=agent_id, task_id=task_id)",
+    "tool_call":        "get_manager().dispatch(HookType.TOOL_CALL, agent_id=agent_id, task_id=task_id, tool_name=tool_name, action=action)",
+    "web_search":       "get_manager().dispatch(HookType.WEB_SEARCH, agent_id=agent_id, task_id=task_id, query=query)",
+    "token_usage":      "get_manager().dispatch(HookType.TOKEN_USAGE, agent_id=agent_id, task_id=task_id)",
+    "budget_warn":      "get_manager().dispatch(HookType.BUDGET_WARN, agent_id=agent_id, task_id=task_id)",
+    "budget_exhausted": "get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id)",
+    "observability":    "get_manager().dispatch(HookType.STEP, agent_id=agent_id, task_id=task_id, checkpoint=checkpoint_name)",
+    "policy":           "get_manager().dispatch(HookType.GATE_EVALUATED, agent_id=agent_id, task_id=task_id, action=action, decision=decision, scope=action, write=True, mode='policy')",
+    "approval":         "get_manager().dispatch(HookType.APPROVAL_REQUIRED, agent_id=agent_id, task_id=task_id, action=action, risk=risk_level)",
+    "feature_flag":     "get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, flag_name=flag_name, enabled=enabled)",
+    "recovery":         "get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, attempt=attempt_number, reason=reason)",
+    "degradation":      "get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id=agent_id, task_id=task_id, from_mode=from_mode, to_mode=to_mode)",
 }
 
 # Regex to extract the hook category from the structured prompt produced by
@@ -72,10 +72,10 @@ def _default_response_json(request: LlmRequest) -> str:
     if m and m.group(1) in _HOOK_CODE:
         category = m.group(1)
 
-    hook_code = _HOOK_CODE.get(category, f"awcp_hooks.{category}()")
+    hook_code = _HOOK_CODE.get(category, f"get_manager().dispatch(HookType.{category.upper()}, agent_id=agent_id, task_id=task_id)")
 
     response: Dict[str, Any] = {
-        "import_additions": ["import awcp_hooks"],
+        "import_additions": ["from awcp.agent_hooks import get_manager", "from awcp.agent_hooks.types import HookType"],
         "changes": [
             {
                 "code_fragment": hook_code,

@@ -10,17 +10,17 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.TASK_FAILED,
-    name="awcp_hooks.task_failed",
+    name="HookType.TASK_FAILED",
     description="AWCP lifecycle hook: emitted when an agent task terminates with an error",
-    signature="awcp_hooks.task_failed(task_id, error, traceback, **context)",
+    signature="get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id, error=str(error))",
     line_number=None,
 )
 
 _KEYWORDS = [
     "task_failed", "task_fail", "on_task_fail", "on_task_failed",
-    "awcp_hooks.task_failed", "awcp.task_failed",
-    "emit_task_failed", "hook.task_fail",
-    "hooks.task_failed", "lifecycle.task_failed",
+    "hooktype.task_failed",
+    "awcp_hooks.task_failed",
+    "emit_task_failed", "hooks.task_failed",
 ]
 
 
@@ -35,6 +35,9 @@ class TaskFailedDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

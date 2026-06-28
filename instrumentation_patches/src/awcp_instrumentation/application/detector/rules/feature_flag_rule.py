@@ -10,17 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.FEATURE_FLAG,
-    name="awcp_hooks.feature_flag",
-    description="AWCP feature-flag hook: emitted when the agent evaluates a feature flag that gates behaviour",
-    signature="awcp_hooks.feature_flag(flag_name, enabled, **context)",
+    name="HookType.SIGNAL_RECEIVED",
+    description="AWCP feature-flag hook: emitted via HookType.SIGNAL_RECEIVED when the agent evaluates a feature flag",
+    signature="get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, flag_name=flag_name, enabled=enabled)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.feature_flag", "awcp.feature_flag",
     "feature_flag_hook", "check_feature_flag",
     "flag_check_hook", "flag_enabled", "flag_evaluated",
-    "hooks.feature_flag", "lifecycle.feature_flag",
+    "hooktype.signal_received",
+    "awcp_hooks.feature_flag",
+    "hooks.feature_flag",
 ]
 
 
@@ -35,6 +36,9 @@ class FeatureFlagDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

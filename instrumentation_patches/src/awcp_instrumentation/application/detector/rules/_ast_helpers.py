@@ -80,6 +80,28 @@ def get_try_except_lines(tree: ast.Module) -> List[int]:
     ]
 
 
+def get_all_attribute_accesses(tree: ast.Module) -> List[Tuple[str, int]]:
+    """Return ``(full.name, line_number)`` for every attribute access in *tree*.
+
+    Captures ``X.Y`` and ``X.Y.Z`` accesses regardless of whether they are
+    used as callables, arguments, or stand-alone expressions.  This lets
+    detection rules find ``HookType.TASK_STARTED`` style references that are
+    passed as arguments to ``get_manager().dispatch(...)`` rather than called
+    directly.
+    """
+    results: List[Tuple[str, int]] = []
+    seen: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and hasattr(node, "lineno"):
+            name = _extract_expr_name(node)
+            if name:
+                key = (name, node.lineno)
+                if key not in seen:
+                    seen.add(key)
+                    results.append((name.lower(), node.lineno))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------

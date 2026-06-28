@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.BUDGET_EXHAUSTED,
-    name="awcp_hooks.budget_exhausted",
+    name="HookType.BUDGET_EXHAUSTED",
     description="AWCP lifecycle hook: emitted when the agent exhausts its allocated token or cost budget",
-    signature="awcp_hooks.budget_exhausted(used_ratio, agent_name, **context)",
+    signature="get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.budget_exhausted", "awcp.budget_exhausted",
-    "on_budget_exhausted", "budget_exhausted_hook",
-    "hooks.budget_exhausted", "lifecycle.budget_exhausted",
-    "emit_budget_exhausted", "budget_exhausted",
+    "on_budget_exhausted", "budget_exhausted_hook", "budget_exhausted",
     "on_budget_exceeded", "budget_exceeded",
+    "hooktype.budget_exhausted",
+    "awcp_hooks.budget_exhausted",
+    "hooks.budget_exhausted", "emit_budget_exhausted",
 ]
 
 
@@ -36,6 +36,9 @@ class BudgetExhaustedDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

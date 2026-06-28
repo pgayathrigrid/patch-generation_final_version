@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.BUDGET_WARN,
-    name="awcp_hooks.budget_warn",
+    name="HookType.BUDGET_WARN",
     description="AWCP lifecycle hook: emitted when token/cost usage approaches the configured threshold",
-    signature="awcp_hooks.budget_warn(used_ratio, limit, agent_name, **context)",
+    signature="get_manager().dispatch(HookType.BUDGET_WARN, agent_id=agent_id, task_id=task_id)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.budget_warn", "awcp.budget_warn",
     "on_budget_warn", "budget_warn_hook", "budget_warning",
-    "hooks.budget_warn", "lifecycle.budget_warn",
-    "emit_budget_warn", "track_budget_warn",
     "on_budget_warning", "budget_warn",
+    "hooktype.budget_warn",
+    "awcp_hooks.budget_warn",
+    "hooks.budget_warn", "emit_budget_warn",
 ]
 
 
@@ -36,6 +36,9 @@ class BudgetWarnDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

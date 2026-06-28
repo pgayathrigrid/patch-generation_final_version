@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.TOKEN_USAGE,
-    name="awcp_hooks.token_usage",
+    name="HookType.TOKEN_USAGE",
     description="AWCP lifecycle hook: reports prompt and completion token counts after each LLM call",
-    signature="awcp_hooks.token_usage(prompt_tokens, completion_tokens, total_tokens, **context)",
+    signature="get_manager().dispatch(HookType.TOKEN_USAGE, agent_id=agent_id, task_id=task_id)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.token_usage", "awcp.token_usage",
     "on_token_usage", "token_usage_hook", "track_tokens", "track_token_usage",
-    "hooks.token_usage", "lifecycle.token_usage",
-    "emit_token_usage", "report_tokens",
-    "token_tracker", "on_tokens",
+    "report_tokens", "token_tracker", "on_tokens",
+    "hooktype.token_usage",
+    "awcp_hooks.token_usage",
+    "hooks.token_usage", "emit_token_usage",
 ]
 
 
@@ -36,6 +36,9 @@ class TokenUsageDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

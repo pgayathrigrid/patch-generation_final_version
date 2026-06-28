@@ -39,6 +39,9 @@ class BaseDetectionRule(DetectionRule):
     def _try_except_lines(self, tree: ast.Module) -> List[int]:
         return _h.get_try_except_lines(tree)
 
+    def _attribute_accesses(self, tree: ast.Module) -> List[Tuple[str, int]]:
+        return _h.get_all_attribute_accesses(tree)
+
     # ------------------------------------------------------------------
     # Matching helpers
     # ------------------------------------------------------------------

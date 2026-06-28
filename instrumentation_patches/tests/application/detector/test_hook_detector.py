@@ -26,25 +26,28 @@ def agent(source: str, name: str = "test_agent") -> AgentSource:
 
 
 FULLY_INSTRUMENTED = """\
+from awcp.agent_hooks import get_manager
+from awcp.agent_hooks.types import HookType
+
 def run():
-    awcp_hooks.task_started(task_id, agent_name)
-    awcp_hooks.llm_call(model, prompt_tokens)
-    awcp_hooks.token_usage(100, 50, 150)
-    awcp_hooks.tool_call(tool_name, args)
-    awcp_hooks.web_search(query, results_count)
-    awcp_hooks.synthesize(input_count, output_length)
-    awcp_hooks.budget_warn(0.8, limit, agent_name)
-    awcp_hooks.budget_exhausted(1.0, agent_name)
-    awcp_hooks.task_completed(task_id, result)
-    awcp_hooks.observability(checkpoint_name, data)
-    awcp_hooks.policy_check(policy_name, decision)
-    awcp_hooks.approval_request(action, risk_level)
-    awcp_hooks.feature_flag(flag_name, enabled)
-    awcp_hooks.recovery(attempt_number, reason)
-    awcp_hooks.degradation(from_mode, to_mode, reason)
+    get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)
+    get_manager().dispatch(HookType.LLM_CALL, agent_id=agent_id, task_id=task_id, model=model)
+    get_manager().dispatch(HookType.TOKEN_USAGE, agent_id=agent_id, task_id=task_id)
+    get_manager().dispatch(HookType.TOOL_CALL, agent_id=agent_id, task_id=task_id, tool_name=tool_name, action=action)
+    get_manager().dispatch(HookType.WEB_SEARCH, agent_id=agent_id, task_id=task_id, query=query)
+    get_manager().dispatch(HookType.SYNTHESIZE, agent_id=agent_id, task_id=task_id)
+    get_manager().dispatch(HookType.BUDGET_WARN, agent_id=agent_id, task_id=task_id)
+    get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id)
+    get_manager().dispatch(HookType.TASK_COMPLETED, agent_id=agent_id, task_id=task_id)
+    get_manager().dispatch(HookType.STEP, agent_id=agent_id, task_id=task_id, checkpoint=checkpoint_name)
+    get_manager().dispatch(HookType.GATE_EVALUATED, agent_id=agent_id, task_id=task_id, action=action, decision=decision, scope=action, write=True, mode='policy')
+    get_manager().dispatch(HookType.APPROVAL_REQUIRED, agent_id=agent_id, task_id=task_id, action=action, risk=risk_level)
+    get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, flag_name=flag_name, enabled=enabled)
 
 def on_error():
-    awcp_hooks.task_failed(task_id, error)
+    get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id, error=str(error))
+    get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, attempt=attempt_number, reason=reason)
+    get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id=agent_id, task_id=task_id, from_mode=from_mode, to_mode=to_mode)
 """
 
 NO_HOOKS = "x = 1\nresult = x + 2\n"
@@ -102,7 +105,7 @@ class TestDetectSingleAgent:
             assert hook.line_number is None
 
     def test_partial_instrumentation(self) -> None:
-        source = "awcp_hooks.task_started(task_id, agent_name)"
+        source = "get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)"
         result = RuleBasedHookDetector().detect(agent(source))
         present_cats = {h.category for h in result.present_hooks}
         missing_cats = {h.category for h in result.missing_hooks}
@@ -135,7 +138,7 @@ class TestDetectAll:
         assert results == []
 
     def test_skips_unparseable_agents(self) -> None:
-        good = agent("awcp_hooks.task_started(t, a)", "good")
+        good = agent("get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)", "good")
         bad = agent("def broken(", "bad")
         scan = self._make_scan_result([good, bad])
         results = RuleBasedHookDetector().detect_all(scan)

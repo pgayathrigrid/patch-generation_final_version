@@ -10,18 +10,18 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _HOOK = GovernanceHook(
     category=HookCategory.SYNTHESIZE,
-    name="awcp_hooks.synthesize",
+    name="HookType.SYNTHESIZE",
     description="AWCP lifecycle hook: emitted when the agent synthesises a final answer",
-    signature="awcp_hooks.synthesize(input_count, output_length, **context)",
+    signature="get_manager().dispatch(HookType.SYNTHESIZE, agent_id=agent_id, task_id=task_id)",
     line_number=None,
 )
 
 _KEYWORDS = [
-    "awcp_hooks.synthesize", "awcp.synthesize",
     "on_synthesize", "synthesize_hook", "before_synthesize", "after_synthesize",
-    "hooks.synthesize", "lifecycle.synthesize",
-    "emit_synthesize", "track_synthesize",
     "synthesis_hook", "on_synthesis",
+    "hooktype.synthesize",
+    "awcp_hooks.synthesize",
+    "hooks.synthesize", "emit_synthesize",
 ]
 
 
@@ -36,6 +36,9 @@ class SynthesizeDetectionRule(BaseDetectionRule):
 
     def detect(self, tree: ast.Module, agent: AgentSource) -> List[GovernanceHook]:
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
+        if match:
+            return [self._found(_HOOK, match[1])]
+        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)
