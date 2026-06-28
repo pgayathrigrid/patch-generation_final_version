@@ -19,10 +19,14 @@ _HOOK = GovernanceHook(
 _KEYWORDS = [
     "feature_flag_hook", "check_feature_flag",
     "flag_check_hook", "flag_enabled", "flag_evaluated",
-    "hooktype.signal_received",
     "awcp_hooks.feature_flag",
     "hooks.feature_flag",
 ]
+
+# Distinguish from RECOVERY (which also uses SIGNAL_RECEIVED) by requiring
+# flag_name= kwarg — the canonical marker for a feature-flag signal.
+_SIGNAL_KEYWORDS = ["dispatch", "signal_received"]
+_REQUIRED_KWARG = "flag_name"
 
 
 class FeatureFlagDetectionRule(BaseDetectionRule):
@@ -38,7 +42,10 @@ class FeatureFlagDetectionRule(BaseDetectionRule):
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
-        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
+        # Detect SIGNAL_RECEIVED dispatch only when flag_name= kwarg is present
+        match = self._first_matching_call_with_kwarg(
+            self._calls_with_kwarg_names(tree), _SIGNAL_KEYWORDS, _REQUIRED_KWARG
+        )
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

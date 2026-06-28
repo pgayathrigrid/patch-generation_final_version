@@ -15,6 +15,7 @@ class _StubManager:
     """No-op hook manager for sandbox execution."""
 
     def dispatch(self, hook_type: HookType, **data: Any) -> HookOutcome:
+        print(f"[AWCP] hook dispatched: {hook_type.value}", flush=True)
         return HookOutcome.allow()
 
     def register(self, hook: Any) -> Any:

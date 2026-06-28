@@ -40,44 +40,78 @@ from awcp_instrumentation.domain.enums.hook_category import HookCategory
 
 _DEFAULT_SIGNALS: Dict[HookCategory, List[str]] = {
     HookCategory.TASK_STARTED: [
+        "[AWCP] hook dispatched: task_started",
         "task_started", "on_task_start", "awcp_hooks.task_started",
         "task started", "task_begin", "task_init",
     ],
     HookCategory.TASK_COMPLETED: [
+        "[AWCP] hook dispatched: task_completed",
         "task_completed", "on_task_complete", "awcp_hooks.task_completed",
         "task completed", "task_done", "task_finish",
     ],
     HookCategory.TASK_FAILED: [
+        "[AWCP] hook dispatched: task_failed",
         "task_failed", "on_task_fail", "awcp_hooks.task_failed",
         "task failed", "task_error", "task_exception",
     ],
     HookCategory.LLM_CALL: [
+        "[AWCP] hook dispatched: llm_call",
         "llm_call", "on_llm_call", "awcp_hooks.llm_call",
         "before_llm", "on_llm_start", "llm call",
     ],
     HookCategory.SYNTHESIZE: [
+        "[AWCP] hook dispatched: synthesize",
         "synthesize", "on_synthesize", "awcp_hooks.synthesize",
         "synthesis_hook", "on_synthesis", "synthesizing",
     ],
     HookCategory.TOOL_CALL: [
+        "[AWCP] hook dispatched: tool_call",
         "tool_call", "on_tool_call", "awcp_hooks.tool_call",
         "on_tool_start", "tool call", "tool_invoke",
     ],
     HookCategory.WEB_SEARCH: [
+        "[AWCP] hook dispatched: web_search",
         "web_search", "on_web_search", "awcp_hooks.web_search",
         "search_hook", "on_search", "searching",
     ],
     HookCategory.TOKEN_USAGE: [
+        "[AWCP] hook dispatched: token_usage",
         "token_usage", "on_token_usage", "awcp_hooks.token_usage",
         "track_tokens", "token_tracker", "tokens used",
     ],
     HookCategory.BUDGET_WARN: [
+        "[AWCP] hook dispatched: budget_warn",
         "budget_warn", "on_budget_warn", "awcp_hooks.budget_warn",
         "budget_warning", "budget warning", "budget threshold",
     ],
     HookCategory.BUDGET_EXHAUSTED: [
+        "[AWCP] hook dispatched: budget_exhausted",
         "budget_exhausted", "on_budget_exhausted", "awcp_hooks.budget_exhausted",
         "budget exhausted", "budget exceeded", "budget_exceeded",
+    ],
+    HookCategory.OBSERVABILITY: [
+        "[AWCP] hook dispatched: step",
+        "hook dispatched: step", "checkpoint", "observability_hook",
+    ],
+    HookCategory.POLICY: [
+        "[AWCP] hook dispatched: gate_evaluated",
+        "hook dispatched: gate_evaluated", "gate_evaluated", "policy_gate",
+    ],
+    HookCategory.APPROVAL: [
+        "[AWCP] hook dispatched: approval_required",
+        "hook dispatched: approval_required", "approval_required", "approval_request",
+    ],
+    HookCategory.FEATURE_FLAG: [
+        "[AWCP] hook dispatched: signal_received",
+        "hook dispatched: signal_received", "feature_flag", "flag_evaluated",
+    ],
+    HookCategory.RECOVERY: [
+        "[AWCP] hook dispatched: signal_received",
+        "hook dispatched: signal_received", "recovery_hook", "retry_attempt",
+    ],
+    HookCategory.DEGRADATION: [
+        "[AWCP] hook dispatched: autonomy_degraded",
+        "hook dispatched: autonomy_degraded", "autonomy_degraded", "degradation_hook",
     ],
 }
 

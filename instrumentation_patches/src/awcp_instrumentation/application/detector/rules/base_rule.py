@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import replace
-from typing import List, Optional, Set, Tuple
+from typing import FrozenSet, List, Optional, Set, Tuple
 
 from awcp_instrumentation.application.detector.interface import DetectionRule
 from awcp_instrumentation.application.detector.rules import _ast_helpers as _h
@@ -41,6 +41,9 @@ class BaseDetectionRule(DetectionRule):
 
     def _attribute_accesses(self, tree: ast.Module) -> List[Tuple[str, int]]:
         return _h.get_all_attribute_accesses(tree)
+
+    def _calls_with_kwarg_names(self, tree: ast.Module) -> List[Tuple[str, int, frozenset]]:
+        return _h.get_calls_with_kwarg_names(tree)
 
     # ------------------------------------------------------------------
     # Matching helpers
@@ -88,6 +91,22 @@ class BaseDetectionRule(DetectionRule):
     # ------------------------------------------------------------------
     # Hook construction helper
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _first_matching_call_with_kwarg(
+        calls: List[Tuple[str, int, frozenset]],
+        keywords: List[str],
+        required_kwarg: str,
+    ) -> Optional[Tuple[str, int]]:
+        """Return the first call where the name matches any keyword AND the call
+        has *required_kwarg* as a keyword argument, else ``None``."""
+        for name, line, kwargs in calls:
+            if required_kwarg not in kwargs:
+                continue
+            for kw in keywords:
+                if kw in name:
+                    return name, line
+        return None
 
     @staticmethod
     def _found(hook: GovernanceHook, line: int) -> GovernanceHook:

@@ -80,6 +80,79 @@ def get_try_except_lines(tree: ast.Module) -> List[int]:
     ]
 
 
+def get_calls_with_kwarg_names(tree: ast.Module) -> List[Tuple[str, int, frozenset]]:
+    """Return ``(call_name, line, frozenset_of_kwarg_names)`` for every call in *tree*.
+
+    The kwarg set lets detection rules distinguish two calls that share the same
+    hook type (e.g. two ``SIGNAL_RECEIVED`` dispatches where one has ``flag_name=``
+    and the other has ``attempt=``).
+    """
+    results: List[Tuple[str, int, frozenset]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = _extract_call_name(node)
+            if name is not None:
+                kwargs = frozenset(
+                    kw.arg for kw in node.keywords if kw.arg is not None
+                )
+                results.append((name.lower(), node.lineno, kwargs))
+    return results
+
+
+def get_function_variable_names(tree: ast.Module) -> dict:
+    """Return ``{function_name: [variable_names]}`` for every function in *tree*.
+
+    Collects parameter names, local assignment targets, for-loop targets,
+    with-statement bindings, and exception handler aliases so the LLM prompt
+    can tell the generator which variable names actually exist in each function.
+    """
+    result: dict = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names: List[str] = []
+
+        # Parameters
+        args = node.args
+        for arg in args.args + args.posonlyargs + args.kwonlyargs:
+            names.append(arg.arg)
+        if args.vararg:
+            names.append(args.vararg.arg)
+        if args.kwarg:
+            names.append(args.kwarg.arg)
+
+        # Body: assignments, for-loops, with-statements, except aliases
+        for child in ast.walk(node):
+            if isinstance(child, ast.Assign):
+                for t in child.targets:
+                    names.extend(_extract_assign_names(t))
+            elif isinstance(child, (ast.AnnAssign, ast.AugAssign)):
+                names.extend(_extract_assign_names(child.target))
+            elif isinstance(child, (ast.For, ast.AsyncFor)):
+                names.extend(_extract_assign_names(child.target))
+            elif isinstance(child, ast.withitem) and child.optional_vars:
+                names.extend(_extract_assign_names(child.optional_vars))
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                names.append(child.name)
+
+        result[node.name] = sorted(set(names))
+    return result
+
+
+def _extract_assign_names(node: ast.expr) -> List[str]:
+    """Recursively pull variable names out of an assignment target node."""
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, (ast.Tuple, ast.List)):
+        names: List[str] = []
+        for elt in node.elts:
+            names.extend(_extract_assign_names(elt))
+        return names
+    if isinstance(node, ast.Starred):
+        return _extract_assign_names(node.value)
+    return []
+
+
 def get_all_attribute_accesses(tree: ast.Module) -> List[Tuple[str, int]]:
     """Return ``(full.name, line_number)`` for every attribute access in *tree*.
 

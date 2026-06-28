@@ -19,10 +19,14 @@ _HOOK = GovernanceHook(
 _KEYWORDS = [
     "recovery_hook", "on_recovery", "retry_hook",
     "recover_hook", "on_retry", "retry_attempt",
-    "hooktype.signal_received",
     "awcp_hooks.recovery",
     "hooks.recovery",
 ]
+
+# Distinguish from FEATURE_FLAG (which also uses SIGNAL_RECEIVED) by requiring
+# attempt= kwarg — the canonical marker for a recovery/retry signal.
+_SIGNAL_KEYWORDS = ["dispatch", "signal_received"]
+_REQUIRED_KWARG = "attempt"
 
 
 class RecoveryDetectionRule(BaseDetectionRule):
@@ -38,7 +42,10 @@ class RecoveryDetectionRule(BaseDetectionRule):
         match = self._first_matching_call(self._call_sites(tree), _KEYWORDS)
         if match:
             return [self._found(_HOOK, match[1])]
-        match = self._first_matching_call(self._attribute_accesses(tree), _KEYWORDS)
+        # Detect SIGNAL_RECEIVED dispatch only when attempt= kwarg is present
+        match = self._first_matching_call_with_kwarg(
+            self._calls_with_kwarg_names(tree), _SIGNAL_KEYWORDS, _REQUIRED_KWARG
+        )
         if match:
             return [self._found(_HOOK, match[1])]
         dec = self._first_matching_decorator(self._decorator_sites(tree), _KEYWORDS)

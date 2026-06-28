@@ -7,6 +7,9 @@ to prompt strategy never touch the generator or parser.
 """
 from __future__ import annotations
 
+import ast
+
+from awcp_instrumentation.application.detector.rules import _ast_helpers as _h
 from awcp_instrumentation.application.gap_reporter.models import GovernanceGap
 from awcp_instrumentation.application.generator.llm_interface import LlmRequest
 from awcp_instrumentation.domain.entities.agent_source import AgentSource
@@ -48,6 +51,10 @@ Strict rules:
 - Do not duplicate imports that already exist in the source.
 - All code_fragment values must be syntactically valid Python.
 - If no imports are needed, return an empty list: "import_additions": [].
+- Use ONLY variable names that already exist in the target function's scope \
+(listed in the "Available Variables" section). Do NOT invent variable names \
+that do not appear there. If the required variable does not exist, use None \
+as a fallback literal.
 - Respond ONLY with the JSON object. No markdown fences, no preamble, no \
 trailing explanation outside the JSON structure.
 """
@@ -58,6 +65,16 @@ _USER_PROMPT_TEMPLATE = """\
 ```python
 {source_code}
 ```
+
+---
+
+## Available Variables Per Function
+
+The following variables are in scope within each function in the agent above.
+Use ONLY these names in your generated code fragment — do not invent names \
+that are not listed here.
+
+{variable_context}
 
 ---
 
@@ -132,8 +149,10 @@ class PromptBuilder:
         Returns:
             A fully populated ``LlmRequest`` ready to be sent to an LLM provider.
         """
+        variable_context = self._format_variable_context(agent.source_code)
         user_prompt = _USER_PROMPT_TEMPLATE.format(
             source_code=agent.source_code,
+            variable_context=variable_context,
             category=gap.category.value,
             hook_name=gap.hook.name,
             hook_description=gap.hook.description,
@@ -148,3 +167,24 @@ class PromptBuilder:
             temperature=self._temperature,
             model=self._model,
         )
+
+    @staticmethod
+    def _format_variable_context(source_code: str) -> str:
+        """Parse *source_code* and return a human-readable summary of each
+        function's in-scope variable names for inclusion in the LLM prompt."""
+        try:
+            tree = ast.parse(source_code)
+        except SyntaxError:
+            return "(source could not be parsed — variable names unavailable)"
+
+        func_vars = _h.get_function_variable_names(tree)
+        if not func_vars:
+            return "(no functions found in source)"
+
+        lines = []
+        for fn_name, var_names in func_vars.items():
+            if var_names:
+                lines.append(f"- `{fn_name}`: {', '.join(f'`{v}`' for v in var_names)}")
+            else:
+                lines.append(f"- `{fn_name}`: (no local variables)")
+        return "\n".join(lines)
