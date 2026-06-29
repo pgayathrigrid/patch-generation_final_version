@@ -30,6 +30,23 @@ You will receive:
 2. A specific governance gap that must be addressed.
 3. An instrumentation hint describing exactly what to add.
 
+## AWCP Hook Dispatch Pattern
+
+ALL hooks MUST be dispatched using the real AWCP hook system — never use \
+custom classes or print statements. The exact pattern is:
+
+    from awcp.agent_hooks import get_manager
+    from awcp.agent_hooks.types import HookType
+
+    get_manager().dispatch(HookType.<TYPE>, agent_id=<agent_id_var>, task_id=<task_id_var>)
+
+The "import_additions" field MUST always include BOTH of these imports \
+(unless they are already present in the source):
+    "from awcp.agent_hooks import get_manager"
+    "from awcp.agent_hooks.types import HookType"
+
+## Response Format
+
 Your response MUST be a single valid JSON object with this exact structure:
 
 {
@@ -46,16 +63,32 @@ Your response MUST be a single valid JSON object with this exact structure:
   "confidence": <float between 0.0 and 1.0>
 }
 
-Strict rules:
+## Strict Rules
+
 - Address ONLY the specified governance gap. Do not add unrelated code.
+- NEVER restructure, rewrite, or modify existing function bodies. Only INSERT \
+the single dispatch call. Do not add helper variables, do not move existing \
+statements, do not add a new return statement.
+- code_fragment MUST contain only the single get_manager().dispatch(...) call \
+(one statement). If numeric values like token counts are unavailable, use 0 \
+or None as fallbacks. Do not compute them with new variable assignments.
 - Keep additions minimal. Do not refactor, rename, or restructure existing code.
 - Do not duplicate imports that already exist in the source.
 - All code_fragment values must be syntactically valid Python.
+- code_fragment values MUST NOT contain any leading indentation. Write every \
+line starting at column 0. Relative indentation within the fragment (e.g. \
+for nested if-blocks) is allowed, but the outermost level must be column 0. \
+The instrumentation engine automatically applies the correct indentation when \
+it inserts the fragment into the target function body.
 - If no imports are needed, return an empty list: "import_additions": [].
-- Use ONLY variable names that already exist in the target function's scope \
-(listed in the "Available Variables" section). Do NOT invent variable names \
-that do not appear there. If the required variable does not exist, use None \
-as a fallback literal.
+- Use ONLY variable names listed in the "Available Variables" section for the \
+target function. For location="before_function_body", only use variables that \
+are function parameters or module-level constants — NOT local variables \
+assigned inside the function body (they do not exist yet at that point). If a \
+needed variable (e.g. task_id) is defined inside the function, use None as the \
+fallback for task_id.
+- Never generate custom hook classes, stub classes, or print-based hooks. \
+Always use get_manager().dispatch(HookType.<TYPE>, ...).
 - Respond ONLY with the JSON object. No markdown fences, no preamble, no \
 trailing explanation outside the JSON structure.
 """
@@ -115,6 +148,23 @@ You are an expert Python software engineer specialising in AI agent governance \
 instrumentation. Your task is to add multiple missing governance hooks to a \
 Python agent's source code.
 
+## AWCP Hook Dispatch Pattern
+
+ALL hooks MUST be dispatched using the real AWCP hook system — never use \
+custom classes or print statements. The exact pattern is:
+
+    from awcp.agent_hooks import get_manager
+    from awcp.agent_hooks.types import HookType
+
+    get_manager().dispatch(HookType.<TYPE>, agent_id=<agent_id_var>, task_id=<task_id_var>)
+
+Every object in your response array MUST include these two imports in \
+"import_additions" (unless already present in the source):
+    "from awcp.agent_hooks import get_manager"
+    "from awcp.agent_hooks.types import HookType"
+
+## Response Format
+
 Your response MUST be a JSON array with exactly one object per gap, in the \
 same order as the gaps are listed. Each object must have this exact structure:
 
@@ -132,16 +182,32 @@ same order as the gaps are listed. Each object must have this exact structure:
   "confidence": <float between 0.0 and 1.0>
 }
 
-Strict rules:
+## Strict Rules
+
 - Address ONLY the governance gap described for each array element.
+- NEVER restructure, rewrite, or modify existing function bodies. Only INSERT \
+the single dispatch call. Do not add helper variables, do not move existing \
+statements, do not add a new return statement.
+- code_fragment MUST contain only the single get_manager().dispatch(...) call \
+(one statement). If numeric values like token counts are unavailable, use 0 \
+or None as fallbacks. Do not compute them with new variable assignments.
 - Keep additions minimal. Do not refactor, rename, or restructure existing code.
 - Do not duplicate imports that already exist in the source.
 - All code_fragment values must be syntactically valid Python.
+- code_fragment values MUST NOT contain any leading indentation. Write every \
+line starting at column 0. Relative indentation within the fragment (e.g. \
+for nested if-blocks) is allowed, but the outermost level must be column 0. \
+The instrumentation engine automatically applies the correct indentation when \
+it inserts the fragment into the target function body.
 - If no imports are needed, return an empty list: "import_additions": [].
-- Use ONLY variable names that already exist in the target function's scope \
-(listed in the "Available Variables" section). Do NOT invent variable names \
-that do not appear there. If the required variable does not exist, use None \
-as a fallback literal.
+- Use ONLY variable names listed in the "Available Variables" section for the \
+target function. For location="before_function_body", only use variables that \
+are function parameters or module-level constants — NOT local variables \
+assigned inside the function body (they do not exist yet at that point). If a \
+needed variable (e.g. task_id) is defined inside the function, use None as the \
+fallback for task_id.
+- Never generate custom hook classes, stub classes, or print-based hooks. \
+Always use get_manager().dispatch(HookType.<TYPE>, ...).
 - Respond ONLY with the JSON array. No markdown fences, no preamble, no \
 trailing explanation outside the JSON array.
 """
@@ -290,21 +356,57 @@ class PromptBuilder:
 
     @staticmethod
     def _format_variable_context(source_code: str) -> str:
-        """Parse *source_code* and return a human-readable summary of each
-        function's in-scope variable names for inclusion in the LLM prompt."""
+        """Parse *source_code* and return a per-function variable summary.
+
+        Separates parameters (available at function entry — safe to use in
+        before_function_body or inline patches) from local variables (assigned
+        during the function body — NOT available at the very start).
+        """
         try:
             tree = ast.parse(source_code)
         except SyntaxError:
             return "(source could not be parsed — variable names unavailable)"
 
-        func_vars = _h.get_function_variable_names(tree)
-        if not func_vars:
-            return "(no functions found in source)"
-
         lines = []
-        for fn_name, var_names in func_vars.items():
-            if var_names:
-                lines.append(f"- `{fn_name}`: {', '.join(f'`{v}`' for v in var_names)}")
-            else:
-                lines.append(f"- `{fn_name}`: (no local variables)")
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            # Collect parameters — available immediately at function entry
+            args = node.args
+            params = []
+            for arg in args.args + args.posonlyargs + args.kwonlyargs:
+                params.append(arg.arg)
+            if args.vararg:
+                params.append(args.vararg.arg)
+            if args.kwarg:
+                params.append(args.kwarg.arg)
+
+            # Collect local variables — only available AFTER they are assigned
+            locals_set: set = set()
+            for child in ast.walk(node):
+                if isinstance(child, ast.Assign):
+                    for t in child.targets:
+                        locals_set.update(_h._extract_assign_names(t))
+                elif isinstance(child, (ast.AnnAssign, ast.AugAssign)):
+                    locals_set.update(_h._extract_assign_names(child.target))
+                elif isinstance(child, (ast.For, ast.AsyncFor)):
+                    locals_set.update(_h._extract_assign_names(child.target))
+                elif isinstance(child, ast.withitem) and child.optional_vars:
+                    locals_set.update(_h._extract_assign_names(child.optional_vars))
+                elif isinstance(child, ast.ExceptHandler) and child.name:
+                    locals_set.add(child.name)
+            # Remove params from locals to avoid duplication
+            local_vars = sorted(locals_set - set(params))
+
+            param_str = ", ".join(f"`{p}`" for p in params) if params else "none"
+            local_str = ", ".join(f"`{v}`" for v in local_vars) if local_vars else "none"
+            lines.append(
+                f"- `{node.name}`:\n"
+                f"    Parameters (safe at function start): {param_str}\n"
+                f"    Locals (assigned inside body — NOT available at function start): {local_str}"
+            )
+
+        if not lines:
+            return "(no functions found in source)"
         return "\n".join(lines)

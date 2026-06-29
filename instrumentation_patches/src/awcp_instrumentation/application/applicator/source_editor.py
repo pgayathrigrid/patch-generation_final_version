@@ -9,6 +9,8 @@ AST analysis for finding insertion points is handled by ``LocationResolver``.
 """
 from __future__ import annotations
 
+import textwrap
+
 
 class SourceEditor:
     """
@@ -94,12 +96,19 @@ class SourceEditor:
         """
         Prepend *base_indent* to every non-empty line in *code*.
 
+        The fragment is first normalised with ``textwrap.dedent`` so that any
+        common leading whitespace already present in the fragment (e.g. when an
+        LLM generates code pre-indented to function-body level) is stripped
+        before the engine-controlled indentation is applied.  This prevents
+        double-indentation artifacts.
+
         Empty lines (containing only whitespace) are left as blank lines
         rather than filled with the indent, which avoids trailing-whitespace
         issues in the output.
         """
         if not base_indent:
             return code
+        code = textwrap.dedent(code)
         result_lines = []
         for line in code.splitlines():
             if line.strip():

@@ -1,61 +1,29 @@
 # Instrumentation Patches — Project Report
 
-## What This Project Does
+## What This Does
 
-`instrumentation_patches` is a governance instrumentation engine built to work as part of the AWCP platform. It scans any Python AI agent repository, detects which AWCP governance hooks are missing, generates targeted patches using an LLM, applies them to the source code, and validates the result in an isolated sandbox. The final output is a structured pass/fail result that AWCP uses as a pre-flight gate before allowing any agent to launch.
-
-This is **Step 06** of the AWCP Operating Model: *"Generate Instrumentation Patches — for agents missing hooks, generate and attach a proposed patch for telemetry, feature flags, and policy callbacks before they can leave quarantine."*
+`instrumentation_patches` is **Step 06 of the AWCP Operating Model**. It scans Python AI agent source code, finds missing AWCP governance hooks, generates patch code using an LLM, applies the patches, and validates the result. AWCP uses this as a gate — agents with missing hooks cannot launch until they pass.
 
 ---
 
-## Pipeline
+## How the Pipeline Works
 
 ```
-.py files on disk
+Agent .py files
        │
- Stage 1 — FilesystemScanner
-       │   Walks the folder, reads all .py files
-       │   → AgentSource objects (filename + source code)
+  1 — FilesystemScanner       reads all .py files in the target path
+  2 — AstCapabilityAnalyzer   detects what the agent does (LLM calls? tools? web search?)
+  3 — RuleBasedHookDetector   finds which AWCP hooks are already present (16 rules)
+  4 — GovernanceGapReporter   required hooks − present hooks = gaps to fill
+  5 — LlmPatchGenerator       sends gaps to an LLM → gets back hook dispatch code
+  6 — SourcePatchApplier      inserts the generated code into the right place in source
+  6.5 — Re-detection          confirms the inserted hooks are actually detectable
+  7 — PythonSandboxValidator  runs patched code in a subprocess (skipped in dry_run)
+  8 — ValidationReportBuilder builds the final report with diff, warnings, pass/fail
        │
- Stage 2 — AstCapabilityAnalyzer
-       │   Parses AST to detect what the agent does
-       │   (calls openai/anthropic? uses tools? does web search?)
-       │   → which AWCP hook categories are required for this agent
-       │
- Stage 3 — RuleBasedHookDetector  (16 rules)
-       │   Scans source for existing AWCP hook calls
-       │   → which hook categories are already present
-       │
- Stage 4 — GovernanceGapReporter
-       │   required hooks − present hooks = gaps
-       │   → GovernanceGap objects (severity, risk, LLM hint per gap)
-       │
- Stage 5 — LlmPatchGenerator
-       │   1 gap  → single LLM call
-       │   2+ gaps → one batched LLM call (JSON array), fallback to per-gap
-       │   → PatchProposal objects (generated hook call code)
-       │
- Stage 6 — SourcePatchApplier
-       │   Inserts generated code into the correct location in source
-       │   (ImportManager + LocationResolver + SourceEditor)
-       │   → PatchedSource in memory + unified diff
-       │
- Stage 6.5 — Re-detection
-       │   Runs the hook detector again on the patched source
-       │   Warns if a hook was inserted but is not detectable
-       │
- Stage 7 — PythonSandboxValidator       ← skipped when dry_run=True
-       │   Runs patched code in an isolated Python subprocess
-       │   4 phases: syntax check → compile → execute → hook presence
-       │   → pass / fail / skipped
-       │
- Stage 8 — ValidationReportBuilder      ← skipped when dry_run=True
-       │   Assembles per-hook results, warnings, errors, diff, recommendations
-       │   → BuiltReport (renderable as Markdown or JSON)
-       │
- InstrumentationResult
-       └── ✓ passed  →  AWCP allows agent to launch
-           ✗ failed  →  AWCP blocks agent launch (InstrumentationError)
+  InstrumentationResult
+       ├── passed  → agent is allowed to launch
+       └── failed  → agent is blocked (HTTP 424 returned to user)
 ```
 
 ---
@@ -65,151 +33,165 @@ This is **Step 06** of the AWCP Operating Model: *"Generate Instrumentation Patc
 ```
 instrumentation_patches/
 ├── src/
-│   ├── awcp/
-│   │   └── observability/
-│   │       └── setup.py          ← OTel tracer stub (matches real AWCP API)
-│   ├── awcp_hooks/
-│   │   └── __init__.py           ← 16 no-op stub hook functions for sandbox use
+│   ├── awcp_hooks/                    ← 16 no-op stubs so patched code runs in sandbox
+│   ├── awcp/observability/setup.py    ← OTel tracer stub (matches real AWCP API)
 │   └── awcp_instrumentation/
-│       ├── api.py                ← public entry point: run_instrumentation()
-│       ├── domain/
-│       │   └── enums/
-│       │       ├── hook_category.py     ← 16 HookCategory values
-│       │       ├── hook_type.py
-│       │       └── agent_capability.py  ← 10 AgentCapability values
+│       ├── api.py                     ← single entry point: run_instrumentation()
+│       ├── domain/enums/              ← HookCategory, HookType, AgentCapability
 │       └── application/
 │           ├── scanner/               Stage 1
 │           ├── capability_analyzer/   Stage 2
-│           ├── detector/              Stage 3
-│           │   └── rules/             16 detection rules (one per hook category)
+│           ├── detector/rules/        Stage 3 — 16 detection rules
 │           ├── gap_reporter/          Stage 4
-│           ├── generator/             Stage 5
-│           │   └── providers/         LLM provider implementations
+│           ├── generator/
+│           │   └── providers/
+│           │       ├── gemini_provider.py     ← real LLM (Google Gemini)
+│           │       ├── anthropic_provider.py  ← real LLM (Claude)
+│           │       └── mock_provider.py       ← deterministic, used in tests
 │           ├── applicator/            Stage 6
 │           ├── sandbox/               Stage 7
 │           └── reporter/              Stage 8
-├── tests/                        1034 tests
+├── tests/                             1068 tests
 └── pyproject.toml
 ```
 
 ---
 
-## Important Files
+## Key Files — What Each One Does
 
-| File | What it does |
+| File | Purpose |
 |---|---|
-| `api.py` | Single public entry point — `run_instrumentation(path, dry_run=False)` wires all 8 stages and returns `InstrumentationResult` |
-| `awcp_hooks/__init__.py` | 16 no-op stub functions so patched agent code can execute in the sandbox without a real AWCP installation |
-| `awcp/observability/setup.py` | OTel tracer stub — matches the real AWCP `awcp.observability.setup.get_tracer()` API; used for pipeline-level tracing |
-| `ast_capability_analyzer.py` | Reads imports, function calls, and decorators to detect what the agent does → drives which hooks are required |
-| `capability_hook_mapper.py` | Governance policy table: maps each `AgentCapability` to its required `HookCategory` set |
-| `hook_detector.py` | Runs all 16 detection rules against the agent's AST to find present hooks |
-| `risk_catalog.py` | Severity, business impact, and LLM instrumentation hint for every hook category |
-| `prompt_builder.py` | Builds single-gap and batched LLM prompts; `build_batch()` sends 2+ gaps in one call |
-| `response_parser.py` | Parses LLM responses; `parse_batch()` handles the JSON array batch response |
-| `mock_provider.py` | Default LLM provider — deterministic, regex-based, no network calls; used in all tests |
-| `patch_applier.py` | Inserts LLM-generated hook code at the correct location in the agent source |
-| `python_sandbox_validator.py` | Runs patched code in an isolated subprocess; 4-phase validation: syntax → compile → execute → hook presence |
-| `markdown_formatter.py` | Renders `BuiltReport` as a Markdown report including the patch diff section |
+| `api.py` | The only file you need to import. Wires all 8 stages together and auto-detects the LLM provider from env vars. |
+| `gemini_provider.py` | Calls Gemini API using `GEMINI_API_KEY`. Default model: `gemini-2.5-flash`. |
+| `anthropic_provider.py` | Calls Claude API using `ANTHROPIC_API_KEY`. |
+| `mock_provider.py` | Offline fallback — no API key needed. Used in all tests. |
+| `prompt_builder.py` | Builds the LLM prompt for each gap. Tells the LLM exactly what hook to add and where. |
+| `location_resolver.py` | Figures out the exact line number to insert code, so hooks always land after the variables they need. |
+| `patch_applier.py` | Does the actual text insertion into source code. |
+| `python_sandbox_validator.py` | Runs the patched code in a subprocess to check it works before reporting success. |
+| `risk_catalog.py` | Defines severity and guidance for each of the 16 hook categories. |
+
+---
+
+## LLM Providers
+
+The provider is picked automatically from your environment — no configuration required.
+
+**Priority:**
+1. `GEMINI_API_KEY` set → uses **GeminiProvider** (get key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
+2. `ANTHROPIC_API_KEY` set → uses **AnthropicProvider**
+3. Neither set → uses **MockLlmProvider** (works offline, good for tests)
+
+**What every generated patch guarantees:**
+- Correct AWCP pattern: `get_manager().dispatch(HookType.X, agent_id=..., task_id=..., **kwargs)`
+- Syntactically valid Python
+- Inserted after any local variables it references (so no `NameError` at runtime)
+- Only adds the dispatch call — never rewrites or restructures existing code
 
 ---
 
 ## Public API
 
 ```python
-from awcp_instrumentation import run_instrumentation, InstrumentationResult
+from awcp_instrumentation import run_instrumentation
 
-# Full run (all 8 stages, sandbox included)
-result = run_instrumentation("/path/to/agent/folder")
+# Preview patches without touching any files (recommended first step)
+result = run_instrumentation("/path/to/agent.py", dry_run=True)
 
-# Dry run (Stages 1–6 only — generates patches, skips sandbox)
-result = run_instrumentation("/path/to/agent/folder", dry_run=True)
+# Full run — patches + sandbox validation
+result = run_instrumentation("/path/to/agent.py")
 
-# Inject a real LLM provider instead of the mock
-from awcp_instrumentation.application.generator.providers.anthropic_provider import AnthropicProvider
-result = run_instrumentation("/path/to/agent/folder", llm_provider=AnthropicProvider())
+# Explicitly choose a provider
+from awcp_instrumentation.application.generator.providers.gemini_provider import GeminiProvider
+result = run_instrumentation("/path/to/agent.py", llm_provider=GeminiProvider())
 ```
 
-**Key fields on `InstrumentationResult`:**
+**What you get back:**
 
-| Field / Property | Type | What it tells you |
-|---|---|---|
-| `result.agents` | `List[AgentInstrumentationSummary]` | Per-agent outcome |
-| `result.total_missing_hooks` | `int` | Total hooks still missing after patching |
-| `result.total_patches_applied` | `int` | Total patches successfully applied |
-| `result.quarantine_blockers` | `List[str]` | Missing hooks that specifically block AWCP quarantine exit (`observability`, `feature_flag`, `policy`) |
-| `result.patch_bundle` | `str` | Combined unified diff across all agents — for PR / CI review |
-| `result.success` | `bool` | `True` when every agent passed sandbox validation |
-| `agent.validation_status` | `str` | `"passed"` / `"failed"` / `"skipped"` |
-| `agent.report.patch_diff` | `str` | The exact code diff applied to that agent |
+| Field | What it tells you |
+|---|---|
+| `result.agents` | List of per-agent results |
+| `result.patch_bundle` | Combined diff across all agents — ready for PR review |
+| `result.quarantine_blockers` | Hook categories still missing that block AWCP quarantine exit |
+| `result.total_patches_applied` | How many patches were successfully applied |
+| `agent.missing_hooks` | Which hooks were missing before patching |
+| `agent.patches_applied` | How many were patched |
+| `agent.report.patch_diff` | The exact diff for that agent |
+| `agent.validation_status` | `"passed"` / `"failed"` / `"skipped"` |
 
 ---
 
-## How to Run
+## For Team
+
+### 1. Setup
 
 ```bash
-# Install
-cd instrumentation_patches
-pip install -e .
+# Requires Python 3.11+
+pip install -e instrumentation_patches/
 
-# Run against any agent folder
-python3 -c "
-from awcp_instrumentation import run_instrumentation
-result = run_instrumentation('/path/to/agent/folder')
-print(result.repository_summary)
-for agent in result.agents:
-    print(agent.agent_name, agent.validation_status)
-    print('quarantine blockers:', agent.quarantine_blockers)
-"
-
-# Dry run — preview patches without sandbox execution
-python3 -c "
-from awcp_instrumentation import run_instrumentation
-result = run_instrumentation('/path/to/agent/folder', dry_run=True)
-print(result.patch_bundle)
-"
-
-# Run tests
-cd instrumentation_patches
-python -m pytest tests/ -q
+# Add your API key to ~/.zshrc, then run: source ~/.zshrc
+export GEMINI_API_KEY="your-key-from-aistudio.google.com/apikey"
+# or: export ANTHROPIC_API_KEY="your-key"
 ```
+
+### 2. Run it
+
+```python
+from awcp_instrumentation import run_instrumentation
+
+# Point it at your agent file — it handles everything automatically
+result = run_instrumentation("/path/to/your/agent.py", dry_run=True)
+
+for agent in result.agents:
+    print(f"Missing hooks:    {agent.missing_hooks}")
+    print(f"Patches applied:  {agent.patches_applied}")
+    print(agent.report.patch_diff)  # exact lines that would be added
+```
+
+### 3. Scan a whole folder
+
+```python
+result = run_instrumentation("/path/to/agents/folder/", dry_run=True)
+
+for agent in result.agents:
+    print(f"{agent.agent_name}: {agent.patches_applied} patches applied")
+    if agent.quarantine_blockers:
+        print(f"  Still blocked: {agent.quarantine_blockers}")
+```
+
+### 4. Save and apply the diff
+
+```python
+result = run_instrumentation("/path/to/agent.py", dry_run=True)
+
+with open("instrumentation.patch", "w") as f:
+    f.write(result.patch_bundle)
+```
+
+```bash
+# Apply from terminal after reviewing the diff
+patch -p0 < instrumentation.patch
+```
+
+> **Set your API key, point it at your agent — done.**
 
 ---
 
-## How It Works Inside the AWCP Application
-
-When AWCP receives `POST /user/ask` to run an agent task, the gateway goes through `agents_fs.py` to launch the agent. Before the agent process is started, the governance pre-flight runs:
+## How It Fits Into AWCP
 
 ```
 User → POST /user/ask
-         │
-         ▼
-   user.py (gateway)
-         │
-         ▼
-   agents_fs.start(agent)
-         │
-         ├── run_instrumentation(agent["dir"])   ← instrumentation_patches runs here
-         │        │
-         │        ├── Scans agent source for missing hooks
-         │        ├── Generates + applies patches via LLM
-         │        └── Validates in sandbox
-         │
-         ├── result.success == True  →  subprocess.Popen(agent run.sh)  ✅ agent launches
-         │
-         └── result.success == False →  raise InstrumentationError      ❌ agent blocked
-                                              │
-                                         user.py catches it
-                                              │
-                                         HTTP 424 returned to user
-                                         "agent blocked by governance instrumentation"
+            │
+      agents_fs.start(agent)
+            │
+            ├── run_instrumentation(agent["dir"])
+            │       ├── scans for missing hooks
+            │       ├── generates + applies patches via LLM
+            │       └── validates in sandbox
+            │
+            ├── success → agent launches normally         ✅
+            └── failure → HTTP 424, agent blocked         ❌
+                          "blocked by governance instrumentation"
 ```
 
-**What this means in practice:**
-
-- An agent that is missing required AWCP hooks (`observability`, `feature_flag`, `policy`, etc.) **cannot launch** through AWCP
-- `instrumentation_patches` runs automatically every time an agent is started — it is the enforcement mechanism
-- If the patches succeed and the sandbox validates them, the agent launches normally
-- If the patches fail (hooks can't be inserted, sandbox rejects them), the agent is blocked and the user gets a clear error explaining why
-
-The `quarantine_blockers` field on `InstrumentationResult` maps directly to what AWCP's quarantine check reports: an agent stays quarantined until `observability`, `feature_flag`, and `policy` hooks are present and observed. `instrumentation_patches` is the tool that generates those hooks so agents can exit quarantine.
+An agent stays in AWCP quarantine until `observability`, `feature_flag`, and `policy` hooks are present. `instrumentation_patches` is the tool that generates those hooks so the agent can exit quarantine and launch.

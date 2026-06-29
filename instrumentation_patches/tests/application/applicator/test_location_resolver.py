@@ -230,23 +230,35 @@ class TestAroundFunction:
 # ---------------------------------------------------------------------------
 
 class TestInline:
-    def test_with_target_function_resolves_to_body(self) -> None:
+    def test_with_target_function_resolves_after_initial_assignments(self) -> None:
+        # SIMPLE_SOURCE has run() with "x = 1" on line 5 then "return x" on line 6.
+        # INLINE should insert AFTER the initial "x = 1" assignment, i.e. before line 6.
         r = RESOLVER.resolve(
             InsertionLocation.INLINE,
             SIMPLE_SOURCE,
             target_function="run",
         )
-        # should equal BEFORE_FUNCTION_BODY position for "run"
-        assert r.line_number == 5
+        assert r.line_number == 6
 
-    def test_with_target_function_has_warning(self) -> None:
+    def test_with_target_function_no_warning_on_clean_resolution(self) -> None:
+        # INLINE resolves cleanly when a target function is found — no warning needed.
         r = RESOLVER.resolve(
             InsertionLocation.INLINE,
             SIMPLE_SOURCE,
             target_function="run",
         )
-        assert r.warning is not None
-        assert "INLINE" in r.warning
+        assert r.warning is None
+
+    def test_inline_function_with_no_initial_assignments_resolves_to_body_start(self) -> None:
+        # When the function body has NO leading assignments, INLINE resolves to
+        # the first body line (same as BEFORE_FUNCTION_BODY).
+        source_no_assign = "import os\n\ndef greet():\n    print('hi')\n"
+        r = RESOLVER.resolve(
+            InsertionLocation.INLINE,
+            source_no_assign,
+            target_function="greet",
+        )
+        assert r.line_number == 4  # first (and only) body line
 
     def test_without_target_function_falls_back_to_after_imports(self) -> None:
         r = RESOLVER.resolve(

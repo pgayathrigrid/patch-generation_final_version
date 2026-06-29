@@ -290,7 +290,8 @@ class TestInsertionLocations:
         proposal = make_proposal(changes=[change], import_additions=[])
         result = APPLIER.apply(make_agent(), make_generation_result([proposal]))
         assert "inline_hook()" in result.patched_source.patched_source
-        assert result.patched_source.warning_count > 0
+        # INLINE with a found target resolves cleanly — no warning expected
+        assert result.patched_source.warning_count == 0
 
 
 # ---------------------------------------------------------------------------

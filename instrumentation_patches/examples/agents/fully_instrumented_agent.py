@@ -1,76 +1,36 @@
 """
-FullyInstrumentedAgent — an AWCP agent with ALL 10 lifecycle hooks.
+FullyInstrumentedAgent — an AWCP agent with ALL lifecycle hooks using the
+real AWCP dispatch pattern.
 
-Demonstrates every AWCP lifecycle hook category:
-  1. TASK_STARTED      — emitted at task entry
-  2. LLM_CALL          — emitted before each LLM inference
-  3. TOKEN_USAGE       — emitted after each LLM response
-  4. TOOL_CALL         — emitted before each external tool invocation
-  5. WEB_SEARCH        — emitted before each retrieval query
-  6. SYNTHESIZE        — emitted at answer-synthesis time
-  7. BUDGET_WARN       — emitted when token usage nears the threshold
-  8. BUDGET_EXHAUSTED  — emitted when the token budget is exceeded
-  9. TASK_COMPLETED    — emitted on successful task completion
- 10. TASK_FAILED       — emitted on any task failure path
+Demonstrates every required hook category using get_manager().dispatch():
 
-The hook implementations are stubs (print-based) so the file runs without
-any external dependencies. Replace with real awcp_hooks SDK calls in production.
+  HookType.TASK_STARTED      — emitted at task entry
+  HookType.LLM_CALL          — emitted before each LLM inference
+  HookType.TOKEN_USAGE       — emitted after each LLM response
+  HookType.TOOL_CALL         — emitted before each external tool invocation
+  HookType.WEB_SEARCH        — emitted before each retrieval query
+  HookType.SYNTHESIZE        — emitted at answer-synthesis time
+  HookType.BUDGET_WARN       — emitted when token usage nears the threshold
+  HookType.BUDGET_EXHAUSTED  — emitted when the token budget is exceeded
+  HookType.TASK_COMPLETED    — emitted on successful task completion
+  HookType.TASK_FAILED       — emitted on any task failure path
 """
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
+from awcp.agent_hooks import get_manager
+from awcp.agent_hooks.types import HookType
 
-# ---------------------------------------------------------------------------
-# Stub AWCP hooks namespace (replace with real SDK import in production)
-# ---------------------------------------------------------------------------
-
-class _AwcpHooks:
-    def task_started(self, task_id: str, agent_name: str, **ctx: Any) -> None:
-        print(f"[AWCP] task_started task_id={task_id} agent={agent_name}")
-
-    def task_completed(self, task_id: str, result_summary: str, **ctx: Any) -> None:
-        print(f"[AWCP] task_completed task_id={task_id} summary={result_summary!r}")
-
-    def task_failed(self, task_id: str, error_type: str, error_message: str, **ctx: Any) -> None:
-        print(f"[AWCP] task_failed task_id={task_id} error={error_type}: {error_message}")
-
-    def llm_call(self, model: str, prompt_preview: str, **ctx: Any) -> None:
-        print(f"[AWCP] llm_call model={model} prompt_len={len(prompt_preview)}")
-
-    def token_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int, **ctx: Any) -> None:
-        print(f"[AWCP] token_usage prompt={prompt_tokens} completion={completion_tokens} total={total_tokens}")
-
-    def tool_call(self, tool_name: str, tool_input_summary: str, **ctx: Any) -> None:
-        print(f"[AWCP] tool_call tool={tool_name} input={tool_input_summary!r}")
-
-    def web_search(self, query: str, results_count: int, **ctx: Any) -> None:
-        print(f"[AWCP] web_search query={query!r} results={results_count}")
-
-    def synthesize(self, input_count: int, output_length: int, **ctx: Any) -> None:
-        print(f"[AWCP] synthesize inputs={input_count} output_len={output_length}")
-
-    def budget_warn(self, used_ratio: float, limit: int, agent_name: str, **ctx: Any) -> None:
-        print(f"[AWCP] budget_warn ratio={used_ratio:.2f} limit={limit} agent={agent_name}")
-
-    def budget_exhausted(self, used_ratio: float, agent_name: str, **ctx: Any) -> None:
-        print(f"[AWCP] budget_exhausted ratio={used_ratio:.2f} agent={agent_name}")
-
-
-awcp_hooks = _AwcpHooks()
-
-AGENT_NAME = "FullyInstrumentedAgent"
+AGENT_ID = "fully-instrumented-agent"
 BUDGET_TOKENS = 4096
 WARN_THRESHOLD = 0.80
 
 
-# ---------------------------------------------------------------------------
-# Business logic stubs
-# ---------------------------------------------------------------------------
-
-def fetch_documents(query: str) -> List[str]:
-    awcp_hooks.tool_call("document_store.fetch", f"query={query!r}")
+def fetch_documents(query: str, agent_id: str, task_id: str) -> List[str]:
+    get_manager().dispatch(HookType.TOOL_CALL, agent_id=agent_id, task_id=task_id,
+                           tool_name="document_store.fetch", action=f"fetch:{query}")
     return [
         f"Document 1 about {query}: Lorem ipsum dolor sit amet.",
         f"Document 2 about {query}: Consectetur adipiscing elit.",
@@ -78,61 +38,67 @@ def fetch_documents(query: str) -> List[str]:
     ]
 
 
-def web_lookup(query: str) -> List[str]:
-    awcp_hooks.web_search(query, results_count=3)
+def web_lookup(query: str, agent_id: str, task_id: str) -> List[str]:
+    get_manager().dispatch(HookType.WEB_SEARCH, agent_id=agent_id, task_id=task_id,
+                           query=query, results_count=1)
     return [f"Web result about {query}: relevant finding."]
 
 
-def call_llm(prompt: str, model: str = "claude-3-5-sonnet") -> tuple[str, int, int]:
-    """Returns (response_text, prompt_tokens, completion_tokens)."""
-    awcp_hooks.llm_call(model, prompt[:200])
-    response = f"Summary: key findings from the provided context about the query."
+def call_llm(
+    prompt: str,
+    agent_id: str,
+    task_id: str,
+    model: str = "claude-sonnet-4-6",
+) -> Tuple[str, int, int]:
+    get_manager().dispatch(HookType.LLM_CALL, agent_id=agent_id, task_id=task_id,
+                           model=model, prompt_len=len(prompt))
+    response = "Summary: key findings from the provided context about the query."
     prompt_tokens = len(prompt.split())
     completion_tokens = len(response.split())
-    awcp_hooks.token_usage(prompt_tokens, completion_tokens, prompt_tokens + completion_tokens)
+    get_manager().dispatch(HookType.TOKEN_USAGE, agent_id=agent_id, task_id=task_id,
+                           prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                           total_tokens=prompt_tokens + completion_tokens)
     return response, prompt_tokens, completion_tokens
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
-
 def run(query: str) -> Dict[str, Any]:
     task_id = str(uuid.uuid4())[:8]
-    awcp_hooks.task_started(task_id, AGENT_NAME, query=query)
+    agent_id = AGENT_ID
 
+    get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id,
+                           query=query)
     total_tokens_used = 0
 
     try:
-        # Retrieve documents
-        docs = fetch_documents(query)
-        web_results = web_lookup(query)
+        docs = fetch_documents(query, agent_id, task_id)
+        web_results = web_lookup(query, agent_id, task_id)
 
         all_sources = docs + web_results
         context = "\n".join(all_sources)
         prompt = f"Query: {query}\n\nContext:\n{context}\n\nProvide a concise summary."
 
-        # Check budget before LLM call
         estimated = len(prompt.split())
         if estimated / BUDGET_TOKENS >= WARN_THRESHOLD:
-            awcp_hooks.budget_warn(estimated / BUDGET_TOKENS, BUDGET_TOKENS, AGENT_NAME)
+            get_manager().dispatch(HookType.BUDGET_WARN, agent_id=agent_id, task_id=task_id,
+                                   used_ratio=estimated / BUDGET_TOKENS, limit=BUDGET_TOKENS)
 
         if estimated >= BUDGET_TOKENS:
-            awcp_hooks.budget_exhausted(estimated / BUDGET_TOKENS, AGENT_NAME)
-            awcp_hooks.task_failed(task_id, "BudgetExhausted", "Token budget exceeded before LLM call")
+            get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id,
+                                   used_ratio=estimated / BUDGET_TOKENS)
+            get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id,
+                                   error="Token budget exceeded before LLM call",
+                                   error_type="BudgetExhausted")
             return {"status": "failed", "reason": "budget_exhausted"}
 
-        # Call LLM
-        response, prompt_tokens, completion_tokens = call_llm(prompt)
+        response, prompt_tokens, completion_tokens = call_llm(prompt, agent_id, task_id)
         total_tokens_used = prompt_tokens + completion_tokens
 
-        # Check budget after LLM call
-        ratio = total_tokens_used / BUDGET_TOKENS
-        if ratio >= 1.0:
-            awcp_hooks.budget_exhausted(ratio, AGENT_NAME)
+        if total_tokens_used / BUDGET_TOKENS >= 1.0:
+            get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id,
+                                   used_ratio=total_tokens_used / BUDGET_TOKENS)
 
-        # Synthesise final answer
-        awcp_hooks.synthesize(input_count=len(all_sources), output_length=len(response))
+        get_manager().dispatch(HookType.SYNTHESIZE, agent_id=agent_id, task_id=task_id,
+                               input_count=len(all_sources), output_length=len(response))
 
         result = {
             "status": "completed",
@@ -142,11 +108,13 @@ def run(query: str) -> Dict[str, Any]:
             "web_results_used": len(web_results),
             "tokens_used": total_tokens_used,
         }
-        awcp_hooks.task_completed(task_id, f"Summarised {len(all_sources)} sources")
+        get_manager().dispatch(HookType.TASK_COMPLETED, agent_id=agent_id, task_id=task_id,
+                               result_summary=f"Summarised {len(all_sources)} sources")
         return result
 
     except Exception as exc:
-        awcp_hooks.task_failed(task_id, type(exc).__name__, str(exc))
+        get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id,
+                               error=str(exc), error_type=type(exc).__name__)
         return {"status": "failed", "reason": str(exc)}
 
 

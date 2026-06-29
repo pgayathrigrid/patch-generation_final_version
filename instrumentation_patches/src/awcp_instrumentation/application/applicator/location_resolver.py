@@ -205,18 +205,26 @@ class LocationResolver:
         target_function: Optional[str],
     ) -> ResolvedLocation:
         """
-        INLINE uses BEFORE_FUNCTION_BODY when a target is given, else AFTER_IMPORTS.
+        INLINE inserts after the initial variable assignments in the function
+        body so that local variables like ``task_id`` are already defined.
+
+        Falls back to BEFORE_FUNCTION_BODY if no initial assignments are found,
+        or AFTER_IMPORTS when no target function is given.
         """
         if target_function:
+            result = self._find_inline_point(tree, source, target_function)
+            if result is not None:
+                line_number, indent = result
+                return ResolvedLocation(line_number=line_number, indent=indent)
+            # Fall back to BEFORE_FUNCTION_BODY if function not found or empty
             resolved = self._resolve_before_function_body(tree, source, target_function)
-            warning = (
-                f"INLINE location resolved to start of function '{target_function}'. "
-                "Review insertion point for correctness."
-            )
             return ResolvedLocation(
                 line_number=resolved.line_number,
                 indent=resolved.indent,
-                warning=warning,
+                warning=(
+                    f"INLINE location in '{target_function}' fell back to "
+                    "start of function body."
+                ),
             )
 
         fallback = self._resolve_after_imports(tree, source)
@@ -275,5 +283,74 @@ class LocationResolver:
                 indent = "    "
 
             return line_number, indent
+
+        return None
+
+    @staticmethod
+    def _find_inline_point(
+        tree: ast.Module,
+        source: str,
+        function_name: str,
+    ) -> Optional[tuple[int, str]]:
+        """
+        Find the first line AFTER any leading variable assignments in the
+        function body of *function_name*.
+
+        This lets INLINE patches reference local variables (like ``task_id``)
+        that are assigned at the top of the function body, without needing to
+        know exactly which line they appear on.
+
+        Algorithm:
+        1. Skip an optional leading docstring.
+        2. Walk forward through body statements while they are pure assignments
+           (``ast.Assign``, ``ast.AnnAssign``, ``ast.AugAssign``).
+        3. Return the line immediately after the last such assignment, which is
+           the first line of real logic where all setup variables exist.
+        4. If there are no leading assignments, returns the first body line
+           (same as ``_find_function_body_start``).
+        """
+        source_lines = source.splitlines()
+
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name != function_name:
+                continue
+            if not node.body:
+                continue
+
+            body = node.body
+            start = 0
+
+            # Skip leading docstring
+            if (
+                len(body) > 1
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                start = 1
+
+            # Walk forward past initial assignment statements
+            last_setup_end: Optional[int] = None
+            for stmt in body[start:]:
+                if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                    last_setup_end = getattr(stmt, "end_lineno", None) or stmt.lineno
+                else:
+                    break
+
+            if last_setup_end is not None:
+                insert_line = last_setup_end + 1
+            else:
+                insert_line = body[start].lineno
+
+            # Detect indentation from the insertion-point line
+            if 1 <= insert_line <= len(source_lines):
+                raw_line = source_lines[insert_line - 1]
+                indent = raw_line[: len(raw_line) - len(raw_line.lstrip())]
+            else:
+                indent = "    "
+
+            return insert_line, indent
 
         return None

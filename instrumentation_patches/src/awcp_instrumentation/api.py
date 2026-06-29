@@ -25,6 +25,7 @@ patch generation; the default ``MockLlmProvider`` requires no network access.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -284,6 +285,43 @@ class InstrumentationResult:
 
 
 # ---------------------------------------------------------------------------
+# Provider auto-detection
+# ---------------------------------------------------------------------------
+
+def _default_provider() -> object:
+    """
+    Return the best real LLM provider available in the current environment.
+
+    Priority:
+    1. ``GeminiProvider``   — when ``GEMINI_API_KEY`` or ``GOOGLE_API_KEY`` is set
+    2. ``AnthropicProvider`` — when ``ANTHROPIC_API_KEY`` is set
+    3. ``MockLlmProvider``  — fallback (no network calls, deterministic patches)
+
+    Each real provider is imported lazily so the optional SDK packages are not
+    required unless the corresponding env var is actually present.
+    """
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        try:
+            from awcp_instrumentation.application.generator.providers.gemini_provider import (
+                GeminiProvider,
+            )
+            return GeminiProvider()
+        except ImportError:
+            pass
+
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            from awcp_instrumentation.application.generator.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
+            return AnthropicProvider()
+        except ImportError:
+            pass
+
+    return MockLlmProvider()
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -317,7 +355,7 @@ def run_instrumentation(
     if not target.exists():
         raise ValueError(f"repository_path does not exist: {target}")
 
-    provider = llm_provider if llm_provider is not None else MockLlmProvider()
+    provider = llm_provider if llm_provider is not None else _default_provider()
 
     # Wire the pipeline — all concrete implementations injected here.
     scanner = FilesystemScanner()
