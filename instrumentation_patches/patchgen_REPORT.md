@@ -195,3 +195,56 @@ User → POST /user/ask
 ```
 
 An agent stays in AWCP quarantine until `observability`, `feature_flag`, and `policy` hooks are present. `instrumentation_patches` is the tool that generates those hooks so the agent can exit quarantine and launch.
+
+---
+
+## Integration Changes Made to `awcp-mcp-temp-main`
+
+Two files in the AWCP main branch were updated to wire `instrumentation_patches` into the agent launch lifecycle.
+
+### Change 1 — `requirements.txt`
+
+Added the editable install dependency so `awcp_instrumentation` is importable when the AWCP gateway runs:
+
+```
+# --- Governance instrumentation (Step 06 — scans agent code for missing hooks) ---
+-e ../instrumentation_patches
+```
+
+This assumes `instrumentation_patches/` sits one level up from the AWCP repo root (both in the same parent folder). No other dependency changes were needed.
+
+### Change 2 — `src/awcp/gateway/agents_fs.py`
+
+Added a governance pre-flight check inside `start()` — the function that launches each agent subprocess. It runs before the `subprocess.Popen` call so a non-compliant agent is blocked before it ever starts:
+
+```python
+def start(agent: dict) -> None:
+    """Launch the agent via its own run.sh...
+
+    Runs a governance pre-flight (instrumentation_patches Step 06) before
+    launch. If the agent's source has unresolvable hook gaps that block
+    quarantine exit, launch is refused. If the package is not installed the
+    check is skipped and launch proceeds normally.
+    """
+    try:
+        from awcp_instrumentation import run_instrumentation
+        result = run_instrumentation(agent["dir"])
+        if not result.success:
+            blockers = result.quarantine_blockers or result.pipeline_errors
+            raise RuntimeError(
+                f"Agent '{agent['id']}' blocked by governance instrumentation: "
+                f"{blockers}"
+            )
+    except ImportError:
+        pass  # instrumentation_patches not installed — governance pre-flight skipped
+
+    env = dict(os.environ)
+    ...  # existing launch logic unchanged
+```
+
+**Behaviour summary:**
+- `instrumentation_patches` installed + agent passes → launches normally
+- `instrumentation_patches` installed + agent fails → `RuntimeError` raised, agent blocked
+- `instrumentation_patches` NOT installed → `ImportError` caught silently, launch proceeds (graceful degradation)
+
+---

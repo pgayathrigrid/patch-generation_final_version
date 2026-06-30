@@ -6,6 +6,8 @@ Orchestrates the full loop for each governance gap:
 """
 from __future__ import annotations
 
+import dataclasses
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -124,7 +126,8 @@ class LlmPatchGenerator(PatchGenerator):
         request = self._builder.build(gap, agent)
         try:
             response = self._provider.complete(request)
-            return self._build_success_proposal(gap, request, response)
+            proposal = self._build_success_proposal(gap, request, response)
+            return self._deduplicate_changes(gap, proposal)
         except (LlmProviderError, ResponseParseError, Exception) as exc:
             return self._build_failed_proposal(gap, request, exc)
 
@@ -146,22 +149,103 @@ class LlmPatchGenerator(PatchGenerator):
             response = self._provider.complete(request)
             parsed_list = self._parser.parse_batch(response, len(gaps))
             metadata = self._make_metadata(request, response)
-            return [
-                PatchProposal(
-                    gap=gap,
-                    status=ProposalStatus.SUCCESS,
-                    changes=parsed.changes,
-                    import_additions=parsed.import_additions,
-                    explanation=parsed.explanation,
-                    confidence=parsed.confidence,
-                    metadata=metadata,
-                    raw_llm_response=response.content,
-                    error=None,
+            proposals = [
+                self._deduplicate_changes(
+                    gap,
+                    PatchProposal(
+                        gap=gap,
+                        status=ProposalStatus.SUCCESS,
+                        changes=parsed.changes,
+                        import_additions=parsed.import_additions,
+                        explanation=parsed.explanation,
+                        confidence=parsed.confidence,
+                        metadata=metadata,
+                        raw_llm_response=response.content,
+                        error=None,
+                    ),
                 )
                 for gap, parsed in zip(gaps, parsed_list)
             ]
+            # If any proposal uses the wrong HookType, fall back to per-gap so
+            # each LLM call is focused on exactly one hook — more reliable than
+            # asking the model to keep N types distinct in one batch response.
+            if self._batch_has_wrong_hook_types(gaps, proposals):
+                return [self.generate_for_gap(gap, agent) for gap in gaps]
+            return proposals
         except (LlmProviderError, ResponseParseError, Exception):
             return [self.generate_for_gap(gap, agent) for gap in gaps]
+
+    @staticmethod
+    def _deduplicate_changes(
+        gap: GovernanceGap, proposal: PatchProposal
+    ) -> PatchProposal:
+        """Keep only the first change whose code_fragment dispatches the correct
+        HookType for this gap; drop any extras.
+
+        The LLM sometimes returns multiple changes all dispatching the same hook
+        (e.g. TASK_COMPLETED dispatched 3×). One dispatch is correct; the rest
+        are noise that would produce duplicate instrumentation in the source.
+        If no change matches the expected type, return the proposal unchanged so
+        the applier can surface the mismatch rather than silently dropping all changes.
+        """
+        if not proposal.changes:
+            return proposal
+        expected = f"HookType.{gap.category.name}"
+        matching = [
+            c for c in proposal.changes
+            if c.code_fragment and expected in c.code_fragment
+        ]
+        if not matching:
+            return proposal  # no type match — surface as-is for the applier to handle
+        # Keep the first matching change, sanitized; drop any duplicates
+        clean = LlmPatchGenerator._sanitize_change(matching[0])
+        if [clean] == list(proposal.changes) and clean is matching[0]:
+            return proposal
+        return dataclasses.replace(proposal, changes=[clean])
+
+    @staticmethod
+    def _sanitize_change(change):
+        """Remove common LLM hallucinations from a code_fragment.
+
+        Replaces ``=str(identifier)`` patterns (e.g. ``error=str(e)``) with
+        ``=None``.  Exception variables like ``e`` are only defined inside their
+        ``except`` block and are never in scope at the insertion point, so using
+        them would cause a ``NameError`` at runtime.
+        """
+        from awcp_instrumentation.application.generator.models import PatchChange
+        frag = change.code_fragment or ""
+        # Replace  error=str(e)  /  reason=str(exc)  etc. with  =None
+        frag = re.sub(r"=str\(\w+\)", "=None", frag)
+        if frag == change.code_fragment:
+            return change
+        return dataclasses.replace(change, code_fragment=frag)
+
+    @staticmethod
+    def _batch_has_wrong_hook_types(
+        gaps: List[GovernanceGap], proposals: List[PatchProposal]
+    ) -> bool:
+        """Return True if the batch result has any hook-type quality issues.
+
+        Triggers per-gap fallback on two failure modes:
+        1. Wrong type — a proposal's fragment uses a different HookType than
+           the gap requires (e.g. TASK_STARTED gap gets TASK_COMPLETED dispatch).
+        2. Duplicate — a proposal returns multiple changes all dispatching the
+           same HookType (e.g. TASK_COMPLETED dispatched 3× in one proposal).
+           Each gap should produce exactly one dispatch call.
+        """
+        for gap, proposal in zip(gaps, proposals):
+            expected = f"HookType.{gap.category.name}"
+            correct_count = 0
+            for change in proposal.changes:
+                frag = change.code_fragment or ""
+                if not frag:
+                    continue
+                if expected not in frag:
+                    return True  # wrong type
+                correct_count += 1
+            if correct_count > 1:
+                return True  # duplicate dispatches for the same gap
+        return False
 
     def _build_success_proposal(
         self,

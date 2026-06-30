@@ -341,12 +341,16 @@ class LocationResolver:
 
             if last_setup_end is not None:
                 insert_line = last_setup_end + 1
+                # Read indent from the last assignment line (guaranteed non-blank),
+                # not from insert_line which may be a blank separator line.
+                indent_ref_line = last_setup_end
             else:
                 insert_line = body[start].lineno
+                indent_ref_line = insert_line
 
-            # Detect indentation from the insertion-point line
-            if 1 <= insert_line <= len(source_lines):
-                raw_line = source_lines[insert_line - 1]
+            # Detect indentation from a known non-blank reference line
+            if 1 <= indent_ref_line <= len(source_lines):
+                raw_line = source_lines[indent_ref_line - 1]
                 indent = raw_line[: len(raw_line) - len(raw_line.lstrip())]
             else:
                 indent = "    "

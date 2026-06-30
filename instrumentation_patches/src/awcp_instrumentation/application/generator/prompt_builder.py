@@ -87,6 +87,13 @@ are function parameters or module-level constants — NOT local variables \
 assigned inside the function body (they do not exist yet at that point). If a \
 needed variable (e.g. task_id) is defined inside the function, use None as the \
 fallback for task_id.
+- Do NOT access attributes of parameter objects (e.g. do NOT write req.agent_id \
+or req.task_id). Only use bare top-level variable names from the Available \
+Variables list. If no agent_id variable is in scope, use a descriptive string \
+literal such as "agent". If no task_id variable is in scope, use None.
+- Do NOT use exception handler variables (e.g. `e` from `except Exception as e:`) \
+— they only exist inside the except block and are not available at the insertion \
+point. If you need to pass an error, use None or an empty string as a fallback.
 - Never generate custom hook classes, stub classes, or print-based hooks. \
 Always use get_manager().dispatch(HookType.<TYPE>, ...).
 - Respond ONLY with the JSON object. No markdown fences, no preamble, no \
@@ -191,6 +198,10 @@ statements, do not add a new return statement.
 - code_fragment MUST contain only the single get_manager().dispatch(...) call \
 (one statement). If numeric values like token counts are unavailable, use 0 \
 or None as fallbacks. Do not compute them with new variable assignments.
+- Each array element has its own Hook Name. Use EXACTLY that HookType for that \
+element's dispatch call — do not repeat the same HookType across multiple \
+elements. If Gap 1 is TASK_STARTED, Gap 2 is TASK_COMPLETED, Gap 3 is \
+TASK_FAILED — each must dispatch its own distinct type.
 - Keep additions minimal. Do not refactor, rename, or restructure existing code.
 - Do not duplicate imports that already exist in the source.
 - All code_fragment values must be syntactically valid Python.
@@ -206,6 +217,13 @@ are function parameters or module-level constants — NOT local variables \
 assigned inside the function body (they do not exist yet at that point). If a \
 needed variable (e.g. task_id) is defined inside the function, use None as the \
 fallback for task_id.
+- Do NOT access attributes of parameter objects (e.g. do NOT write req.agent_id \
+or req.task_id). Only use bare top-level variable names from the Available \
+Variables list. If no agent_id variable is in scope, use a descriptive string \
+literal such as "agent". If no task_id variable is in scope, use None.
+- Do NOT use exception handler variables (e.g. `e` from `except Exception as e:`) \
+— they only exist inside the except block and are not available at the insertion \
+point. If you need to pass an error, use None or an empty string as a fallback.
 - Never generate custom hook classes, stub classes, or print-based hooks. \
 Always use get_manager().dispatch(HookType.<TYPE>, ...).
 - Respond ONLY with the JSON array. No markdown fences, no preamble, no \
@@ -216,6 +234,7 @@ _BATCH_GAP_TEMPLATE = """\
 ### Gap {index}: {category}
 
 **Hook Name:** `{hook_name}`
+**REQUIRED HookType (use EXACTLY this, no other):** `HookType.{hook_type_name}`
 **Description:** {hook_description}
 
 **Required Action:** {action}
@@ -333,6 +352,7 @@ class PromptBuilder:
                 index=i + 1,
                 category=g.category.value,
                 hook_name=g.hook.name,
+                hook_type_name=g.category.name,
                 hook_description=g.hook.description,
                 action=g.recommendation.action,
                 instrumentation_hint=g.recommendation.instrumentation_hint,
@@ -394,8 +414,10 @@ class PromptBuilder:
                     locals_set.update(_h._extract_assign_names(child.target))
                 elif isinstance(child, ast.withitem) and child.optional_vars:
                     locals_set.update(_h._extract_assign_names(child.optional_vars))
-                elif isinstance(child, ast.ExceptHandler) and child.name:
-                    locals_set.add(child.name)
+                # ExceptHandler names (e.g. `e` in `except Exception as e:`) are
+                # intentionally excluded — they only exist inside the except block and
+                # confuse the LLM into using them at insertion points where they are
+                # not in scope.
             # Remove params from locals to avoid duplication
             local_vars = sorted(locals_set - set(params))
 

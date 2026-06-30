@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-[#f3f5f3] font-sans text-brand-900 antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+/* soft scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-300;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+/* ── Dark theme ───────────────────────────────────────────────────────────────
+   Toggled by adding `.dark` to <html> (see useTheme). Rather than sprinkling
+   `dark:` variants across every component, we remap the handful of shared palette
+   utilities here — one place themes the whole app (chrome + all pages). Each rule
+   is scoped under `.dark`, so it only raises specificity above the base utility
+   inside dark mode. Accent chips (rose/amber/violet) deliberately stay tinted so
+   alerts and status colours keep reading the same in both themes. */
+.dark body {
+  background-color: #0e1512;
+  color: #e8f0ea;
+}
+.dark .bg-\[\#f3f5f3\] {
+  background-color: #0e1512;
+}
+
+/* surfaces */
+.dark .bg-white {
+  background-color: #16201b;
+}
+.dark .bg-slate-50,
+.dark .bg-slate-50\/70 {
+  background-color: #131c17;
+}
+.dark .bg-slate-100,
+.dark .bg-slate-100\/80 {
+  background-color: #1c2722;
+}
+.dark .bg-slate-200 {
+  background-color: #26322b;
+}
+.dark .bg-brand-50 {
+  background-color: rgba(58, 125, 82, 0.16);
+}
+.dark .bg-brand-100 {
+  background-color: rgba(58, 125, 82, 0.2);
+}
+
+/* hover surfaces */
+.dark .hover\:bg-slate-50:hover {
+  background-color: #1c2722;
+}
+.dark .hover\:bg-slate-100:hover {
+  background-color: #26322b;
+}
+
+/* borders + dividers */
+.dark .border-slate-100 {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+.dark .border-slate-200,
+.dark .border-slate-200\/70 {
+  border-color: rgba(255, 255, 255, 0.11);
+}
+.dark .border-slate-300 {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+/* text */
+.dark .text-brand-900 {
+  color: #e8f0ea;
+}
+.dark .text-slate-700 {
+  color: #cdd7e0;
+}
+.dark .text-slate-600 {
+  color: #bcc7d1;
+}
+.dark .text-slate-500 {
+  color: #93a1b0;
+}
+.dark .text-slate-400 {
+  color: #76838f;
+}
+/* green accents / links read brighter on dark */
+.dark .text-brand-600 {
+  color: #57b87e;
+}
+.dark .text-brand-700 {
+  color: #62c188;
+}
+
+/* form controls */
+.dark input,
+.dark textarea,
+.dark select {
+  color: #e8f0ea;
+  color-scheme: dark;
+}
+.dark ::placeholder {
+  color: #64748b;
+}
+
+/* dark scrollbars */
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #2c3a32;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #3a4d41;
+}
+
+/* ── Risk-tier threshold slider ──────────────────────────────────────────────
+   The track is split by the thumb: RED before the set tier, WHITE after it. The
+   red/white split is set inline per thumb position; here we set the chrome (border
+   so the white half is visible, rounded ends) and a SQUARE thumb. */
+.risk-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff; /* fallback; the live red→white split is applied inline */
+  outline: none;
+  cursor: pointer;
+}
+.risk-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent; /* let the inline element background (red/white) show */
+}
+.risk-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px; /* square thumb */
+  background: var(--thumb-color, #ffffff); /* filled with the current tier's colour */
+  border: 2px solid #334155;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  cursor: pointer;
+}
+.risk-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px; /* square thumb */
+  background: var(--thumb-color, #ffffff); /* filled with the current tier's colour */
+  border: 2px solid #334155;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  cursor: pointer;
+}
+.risk-slider:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
