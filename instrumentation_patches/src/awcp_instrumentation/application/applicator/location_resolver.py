@@ -169,8 +169,22 @@ class LocationResolver:
 
         result = self._find_function_body_start(tree, source, target_function)
         if result is None:
-            raise LocationResolutionError(
-                f"Function '{target_function}' not found in source."
+            # Target function not found — fall back to the first function in source.
+            # This handles agents where the main function has a different name than
+            # the LLM assumed (e.g. "run_goal" instead of "run").
+            fallback = self._find_first_function_body(tree, source)
+            if fallback is None:
+                raise LocationResolutionError(
+                    f"Function '{target_function}' not found in source."
+                )
+            body_line, indent = fallback
+            return ResolvedLocation(
+                line_number=body_line,
+                indent=indent,
+                warning=(
+                    f"Function '{target_function}' not found; "
+                    "falling back to first function in source."
+                ),
             )
         body_line, indent = result
         return ResolvedLocation(line_number=body_line, indent=indent)
@@ -285,6 +299,39 @@ class LocationResolver:
             return line_number, indent
 
         return None
+
+    @staticmethod
+    def _find_first_function_body(
+        tree: ast.Module,
+        source: str,
+    ) -> Optional[tuple[int, str]]:
+        """Return the body start of the first function defined in the source."""
+        source_lines = source.splitlines()
+        first_func = None
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if first_func is None or node.lineno < first_func.lineno:
+                    first_func = node
+
+        if first_func is None or not first_func.body:
+            return None
+
+        first_stmt = first_func.body[0]
+        if (
+            isinstance(first_stmt, ast.Expr)
+            and isinstance(first_stmt.value, ast.Constant)
+            and isinstance(first_stmt.value.value, str)
+            and len(first_func.body) > 1
+        ):
+            first_stmt = first_func.body[1]
+
+        line_number = first_stmt.lineno
+        if 1 <= line_number <= len(source_lines):
+            raw_line = source_lines[line_number - 1]
+            indent = raw_line[: len(raw_line) - len(raw_line.lstrip())]
+        else:
+            indent = "    "
+        return line_number, indent
 
     @staticmethod
     def _find_inline_point(

@@ -28,22 +28,22 @@ from awcp_instrumentation.application.generator.llm_interface import (
 # All arguments use keyword form with safe defaults so the sandbox can execute
 # the code without NameError even when the agent's local variables differ.
 _HOOK_CODE: Dict[str, str] = {
-    "task_started":     "get_manager().dispatch(HookType.TASK_STARTED, agent_id=agent_id, task_id=task_id)",
-    "task_completed":   "get_manager().dispatch(HookType.TASK_COMPLETED, agent_id=agent_id, task_id=task_id)",
-    "task_failed":      "get_manager().dispatch(HookType.TASK_FAILED, agent_id=agent_id, task_id=task_id, error=str(error))",
-    "llm_call":         "get_manager().dispatch(HookType.LLM_CALL, agent_id=agent_id, task_id=task_id, model=model)",
-    "synthesize":       "get_manager().dispatch(HookType.SYNTHESIZE, agent_id=agent_id, task_id=task_id)",
-    "tool_call":        "get_manager().dispatch(HookType.TOOL_CALL, agent_id=agent_id, task_id=task_id, tool_name=tool_name, action=action)",
-    "web_search":       "get_manager().dispatch(HookType.WEB_SEARCH, agent_id=agent_id, task_id=task_id, query=query)",
-    "token_usage":      "get_manager().dispatch(HookType.TOKEN_USAGE, agent_id=agent_id, task_id=task_id)",
-    "budget_warn":      "get_manager().dispatch(HookType.BUDGET_WARN, agent_id=agent_id, task_id=task_id)",
-    "budget_exhausted": "get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id=agent_id, task_id=task_id)",
-    "observability":    "get_manager().dispatch(HookType.STEP, agent_id=agent_id, task_id=task_id, checkpoint=checkpoint_name)",
-    "policy":           "get_manager().dispatch(HookType.GATE_EVALUATED, agent_id=agent_id, task_id=task_id, action=action, decision=decision, scope=action, write=True, mode='policy')",
-    "approval":         "get_manager().dispatch(HookType.APPROVAL_REQUIRED, agent_id=agent_id, task_id=task_id, action=action, risk=risk_level)",
-    "feature_flag":     "get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, flag_name=flag_name, enabled=enabled)",
-    "recovery":         "get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id=agent_id, task_id=task_id, attempt=attempt_number, reason=reason)",
-    "degradation":      "get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id=agent_id, task_id=task_id, from_mode=from_mode, to_mode=to_mode)",
+    "task_started":     'get_manager().dispatch(HookType.TASK_STARTED, agent_id="agent", task_id=None)',
+    "task_completed":   'get_manager().dispatch(HookType.TASK_COMPLETED, agent_id="agent", task_id=None)',
+    "task_failed":      'get_manager().dispatch(HookType.TASK_FAILED, agent_id="agent", task_id=None, error="unknown")',
+    "llm_call":         'get_manager().dispatch(HookType.LLM_CALL, agent_id="agent", task_id=None, model="unknown")',
+    "synthesize":       'get_manager().dispatch(HookType.SYNTHESIZE, agent_id="agent", task_id=None)',
+    "tool_call":        'get_manager().dispatch(HookType.TOOL_CALL, agent_id="agent", task_id=None, tool_name="unknown", action="unknown")',
+    "web_search":       'get_manager().dispatch(HookType.WEB_SEARCH, agent_id="agent", task_id=None, query="unknown")',
+    "token_usage":      'get_manager().dispatch(HookType.TOKEN_USAGE, agent_id="agent", task_id=None)',
+    "budget_warn":      'get_manager().dispatch(HookType.BUDGET_WARN, agent_id="agent", task_id=None)',
+    "budget_exhausted": 'get_manager().dispatch(HookType.BUDGET_EXHAUSTED, agent_id="agent", task_id=None)',
+    "observability":    'get_manager().dispatch(HookType.STEP, agent_id="agent", task_id=None, checkpoint="step")',
+    "policy":           'get_manager().dispatch(HookType.GATE_EVALUATED, agent_id="agent", task_id=None, action="unknown", decision="allow", scope="unknown", write=False, mode="policy")',
+    "approval":         'get_manager().dispatch(HookType.APPROVAL_REQUIRED, agent_id="agent", task_id=None, action="unknown", risk="unknown")',
+    "feature_flag":     'get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id="agent", task_id=None, flag_name="unknown", enabled=False)',
+    "recovery":         'get_manager().dispatch(HookType.SIGNAL_RECEIVED, agent_id="agent", task_id=None, attempt=0, reason="unknown")',
+    "degradation":      'get_manager().dispatch(HookType.AUTONOMY_DEGRADED, agent_id="agent", task_id=None, from_mode="unknown", to_mode="unknown")',
 }
 
 # Regex to extract the hook category from a single-gap prompt:

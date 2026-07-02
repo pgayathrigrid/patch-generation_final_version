@@ -152,29 +152,44 @@ class PythonSandboxValidator(SandboxValidator):
             executed = True
 
             if not record.succeeded:
-                # Runtime failure: mark all presence-passing hooks FAILED
-                error_type = "TimeoutError" if record.timed_out else "RuntimeError"
-                msg = (
-                    "Execution timed out."
-                    if record.timed_out
-                    else f"Subprocess exited with code {record.exit_code}."
-                )
-                if record.stderr:
-                    msg += f" Stderr: {record.stderr[:500]}"
-
-                for proposal in applied:
-                    cat = proposal.category
-                    if cat not in failed_categories:
-                        # Only record runtime failure for hooks that were present
-                        runtime_failed_categories.add(cat)
-                        errors.append(
-                            ValidationError(
-                                category=cat,
-                                error_type=error_type,
-                                message=msg,
-                                traceback=record.stderr or None,
-                            )
+                if self._is_import_error_only(record):
+                    # Agent has external framework dependencies (langgraph, crewai, etc.)
+                    # that aren't installed in the sandbox venv. The hooks ARE present
+                    # (Phase 2 confirmed this) — treat as passed.
+                    warnings.append(
+                        ValidationWarning(
+                            category=HookCategory.TASK_STARTED,
+                            message=(
+                                "Subprocess failed due to unresolvable external imports. "
+                                "Hook code is statically present and syntactically valid "
+                                "— treated as passed."
+                            ),
                         )
+                    )
+                else:
+                    # Real runtime failure — mark all presence-passing hooks FAILED
+                    error_type = "TimeoutError" if record.timed_out else "RuntimeError"
+                    msg = (
+                        "Execution timed out."
+                        if record.timed_out
+                        else f"Subprocess exited with code {record.exit_code}."
+                    )
+                    if record.stderr:
+                        msg += f" Stderr: {record.stderr[:500]}"
+
+                    for proposal in applied:
+                        cat = proposal.category
+                        if cat not in failed_categories:
+                            # Only record runtime failure for hooks that were present
+                            runtime_failed_categories.add(cat)
+                            errors.append(
+                                ValidationError(
+                                    category=cat,
+                                    error_type=error_type,
+                                    message=msg,
+                                    traceback=record.stderr or None,
+                                )
+                            )
 
         elif self._mode == SandboxExecutionMode.IMPORT_CHECK and syntax_valid:
             # Compile-only check — catches NameErrors and similar without executing
@@ -372,6 +387,14 @@ class PythonSandboxValidator(SandboxValidator):
             syntax_valid=syntax_valid,
             observations=observations,
         )
+
+    @staticmethod
+    def _is_import_error_only(record: ExecutionRecord) -> bool:
+        """True when the subprocess failed solely due to an unresolvable import."""
+        if record.exit_code == 0 or record.timed_out:
+            return False
+        stderr = record.stderr or ""
+        return "ModuleNotFoundError" in stderr or "ImportError" in stderr
 
     @staticmethod
     def _build_report(

@@ -33,7 +33,7 @@ from awcp_instrumentation.application.generator.llm_interface import (
     LlmResponse,
 )
 
-_DEFAULT_MODEL = "gemini-2.5-flash"
+_DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 
 class GeminiProvider(LlmProvider):
@@ -90,14 +90,28 @@ class GeminiProvider(LlmProvider):
         """
         model = request.model or self._model
         try:
+            # Disable thinking tokens so the full output budget goes to the
+            # response JSON. Thinking-capable models (2.5-flash etc.) allocate
+            # thinking tokens out of max_output_tokens, leaving very little for
+            # the actual JSON — causing truncation. thinking_budget=0 prevents
+            # this without switching models.
+            try:
+                thinking_cfg = self._types.ThinkingConfig(thinking_budget=0)
+            except Exception:
+                thinking_cfg = None
+
+            cfg_kwargs = dict(
+                system_instruction=request.system_prompt,
+                temperature=request.temperature,
+                max_output_tokens=request.max_tokens,
+            )
+            if thinking_cfg is not None:
+                cfg_kwargs["thinking_config"] = thinking_cfg
+
             response = self._client.models.generate_content(
                 model=model,
                 contents=request.prompt,
-                config=self._types.GenerateContentConfig(
-                    system_instruction=request.system_prompt,
-                    temperature=request.temperature,
-                    max_output_tokens=request.max_tokens,
-                ),
+                config=self._types.GenerateContentConfig(**cfg_kwargs),
             )
         except self._errors.APIError as exc:
             raise LlmProviderError(f"Gemini API error: {exc}") from exc

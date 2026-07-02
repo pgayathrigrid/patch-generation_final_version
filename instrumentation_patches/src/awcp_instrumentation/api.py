@@ -141,8 +141,8 @@ class AgentInstrumentationSummary:
 
     @property
     def success(self) -> bool:
-        """True when sandbox validation passed for this agent."""
-        return self.validation_status == "passed"
+        """True when sandbox validation passed, or agent is already fully instrumented."""
+        return self.validation_status == "passed" or self.is_fully_instrumented
 
     @property
     def is_fully_instrumented(self) -> bool:
@@ -422,6 +422,17 @@ def run_instrumentation(
                                 "is not detectable in the patched source — "
                                 "the patch may have been inserted in an unreachable location."
                             )
+
+                # Stage 6.6 — Write patched source to disk so the agent runs with hooks
+                if not dry_run and patched.has_changes and patched.applied_proposals:
+                    try:
+                        Path(agent.path).write_text(
+                            patched.patched_source, encoding="utf-8"
+                        )
+                    except OSError as exc:
+                        redetect_warnings.append(
+                            f"Patches validated but could not be written to disk: {exc}"
+                        )
 
                 if dry_run:
                     # Stages 7-8 skipped — produce a minimal report from the

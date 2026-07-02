@@ -1,6 +1,7 @@
 # Virtual environments
-.venv/
 venv/
+venv311/
+.venv/
 env/
 
 # Python cache
@@ -18,5 +19,8 @@ build/
 # pytest cache
 .pytest_cache/
 
-# OS files
+# Local binaries
+.bin/
+
+# macOS
 .DS_Store
